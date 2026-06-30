@@ -1,20 +1,20 @@
 /* ── Google Fonts are loaded in index.html ── */
 
 :root {
-  --bg:           #f8f5ef;
-  --surface:      rgba(255, 255, 255, 0.88);
-  --surface-soft: rgba(241, 238, 230, 0.92);
+  --bg:           #f6f8fb;
+  --surface:      rgba(255, 255, 255, 0.90);
+  --surface-soft: rgba(240, 244, 248, 0.96);
   --navy:         #17324d;
   --blue:         #2d628f;
   --green:        #456f57;
   --gold:         #9f7d38;
   --text:         #243447;
-  --muted:        #667684;
-  --border:       #d9d2c6;
+  --muted:        #60707f;
+  --border:       #d8e0e8;
   --danger:       #b63d3d;
-  --warning-bg:   #fff4dc;
+  --warning-bg:   #fff6e0;
   --warning-text: #8a6517;
-  --shadow:       0 18px 45px rgba(23, 50, 77, 0.10);
+  --shadow:       0 22px 50px rgba(23, 50, 77, 0.09);
 
   --font-heading: "Playfair Display", Georgia, serif;
   --font-body:    "Inter", system-ui, sans-serif;
@@ -50,7 +50,7 @@ body {
   line-height: 1.6;
   color: var(--text);
   background:
-    linear-gradient(rgba(245, 241, 234, 0.74), rgba(250, 247, 242, 0.82)),
+    linear-gradient(rgba(246, 248, 251, 0.70), rgba(246, 248, 251, 0.84)),
     url("/casewallpaper.jpg") center/cover fixed no-repeat;
   -webkit-font-smoothing: antialiased;
 }
@@ -102,7 +102,8 @@ input:focus, select:focus, textarea:focus {
   gap: 48px;
   align-items: center;
   padding: 48px clamp(20px, 6vw, 92px);
-  background: linear-gradient(135deg, rgba(45,98,143,0.02), transparent 24%);
+  background:
+    linear-gradient(135deg, rgba(255,255,255,0.28), rgba(255,255,255,0.05) 35%, transparent 70%);
 }
 
 .brand-panel {
@@ -125,9 +126,9 @@ input:focus, select:focus, textarea:focus {
   border: 0;
   padding: 0;
   box-shadow: none;
-  opacity: 0.10;
+  opacity: 0.08;
   mix-blend-mode: multiply;
-  filter: grayscale(0.2) saturate(0.28) contrast(0.76) brightness(1.04);
+  filter: grayscale(0.28) saturate(0.18) contrast(0.72) brightness(1.06);
 }
 
 .eyebrow {
@@ -167,7 +168,7 @@ input:focus, select:focus, textarea:focus {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 36px 32px;
-  box-shadow: 0 18px 38px rgba(23, 50, 77, 0.08);
+  box-shadow: var(--shadow);
   backdrop-filter: blur(16px);
 }
 
@@ -219,6 +220,10 @@ input:focus, select:focus, textarea:focus {
 
 .primary-btn {
   width: 100%;
+  min-height: 46px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 12px;
   border-radius: 8px;
   background: linear-gradient(135deg, var(--green), var(--blue));
@@ -236,6 +241,10 @@ input:focus, select:focus, textarea:focus {
 
 .secondary-btn {
   width: 100%;
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 9px 12px;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -256,9 +265,22 @@ input:focus, select:focus, textarea:focus {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 12px;
   margin-top: 18px;
   font-size: 12px;
   color: var(--muted);
+}
+
+.auth-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.auth-action-btn {
+  width: auto;
+  min-width: 160px;
 }
 
 /* ── Role selection ── */
@@ -278,6 +300,7 @@ input:focus, select:focus, textarea:focus {
   color: var(--text);
   text-align: left;
   transition: border-color 0.15s;
+  min-height: 94px;
 }
 
 .role-card:hover {
@@ -324,7 +347,7 @@ input:focus, select:focus, textarea:focus {
   align-items: center;
   gap: 16px;
   padding: 14px clamp(16px, 5vw, 60px);
-  background: rgba(255, 255, 255, 0.64);
+  background: rgba(255, 255, 255, 0.82);
   border-bottom: 1px solid var(--border);
   backdrop-filter: blur(12px);
 }
@@ -359,6 +382,8 @@ input:focus, select:focus, textarea:focus {
   display: flex;
   justify-content: center;
   gap: 4px;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .nav-tab {
@@ -381,9 +406,12 @@ input:focus, select:focus, textarea:focus {
   align-items: center;
   gap: 10px;
   position: relative;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .theme-btn {
+  min-height: 38px;
   padding: 7px 14px;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -435,9 +463,13 @@ input:focus, select:focus, textarea:focus {
   font-weight: 700;
   color: var(--navy);
   font-size: 14px;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .logout-btn {
+  min-height: 38px;
   padding: 7px 14px;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -635,7 +667,7 @@ input:focus, select:focus, textarea:focus {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 16px;
-  box-shadow: 0 18px 38px rgba(23, 50, 77, 0.08);
+  box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -900,6 +932,7 @@ input:focus, select:focus, textarea:focus {
 }
 
 .send-btn {
+  min-height: 44px;
   padding: 10px 22px;
   border-radius: 24px;
   background: var(--green);
@@ -1097,9 +1130,11 @@ input:focus, select:focus, textarea:focus {
   display: flex;
   gap: 10px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
 }
 
 .tab-btn {
+  min-height: 40px;
   padding: 9px 20px;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -1183,6 +1218,7 @@ tr:last-child td {
 }
 
 .approve-btn, .reject-btn {
+  min-height: 34px;
   padding: 7px 14px;
   border-radius: 6px;
   font-weight: 700;
@@ -1226,20 +1262,78 @@ tr:last-child td {
 @media (max-width: 768px) {
   .auth-shell {
     grid-template-columns: 1fr;
-    padding: 32px 20px;
+    padding: 24px 16px 32px;
   }
 
   .navbar {
     grid-template-columns: 1fr;
     gap: 10px;
+    padding: 12px 14px;
   }
 
   .nav-tabs {
     overflow-x: auto;
     justify-content: flex-start;
+    flex-wrap: nowrap;
+    padding-bottom: 2px;
   }
 
   .search-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .auth-footer-actions {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .auth-action-btn {
+    width: 100%;
+  }
+
+  .nav-user {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .quick-prompts {
+    grid-template-columns: 1fr;
+    padding: 12px 14px 14px;
+  }
+
+  .chat-window,
+  .pending-notice,
+  .chat-disclaimer,
+  .profile-panel {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .chat-input-bar {
+    flex-wrap: wrap;
+    padding: 12px;
+  }
+
+  .chat-input {
+    width: 100%;
+    flex-basis: 100%;
+  }
+
+  .send-btn {
+    width: 100%;
+  }
+
+  .role-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-grid {
     grid-template-columns: 1fr;
   }
 }

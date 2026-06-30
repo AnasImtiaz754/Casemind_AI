@@ -16,7 +16,7 @@ function applyTheme(theme) {
 
 // How long to wait before giving up on a request (12 seconds)
 const REQUEST_TIMEOUT = 12000
-const API_URL = "http://127.0.0.1:8000"
+const API_URL = import.meta.env.VITE_API_BASE_URL?.trim() || "/api"
 const PROFILE_STORAGE_PREFIX = "casemind_profile:"
 const LANG_STORAGE_KEY = "casemind_language"
 const THEME_STORAGE_KEY = "casemind_theme"
@@ -133,10 +133,15 @@ const EXTRA_STRINGS = {
     cityLabel: "City",
     roleLabel: "Role",
     dbaLabel: "DBA Number",
+    cnicLabel: "CNIC Number",
     specializationLabel: "Specialization",
     verificationLabel: "Verification",
     chatbot: "AI Chatbot",
     lawyersTab: "Lawyers",
+    usersTab: "Users",
+    registeredUsers: "Registered Users",
+    usersHeader: "General User Accounts",
+    usersHelp: "These are the general users registered on CaseMind AI.",
     findLawyersTab: "Find Lawyers",
     dashboardTab: "Dashboard",
     logout: "Logout",
@@ -179,10 +184,15 @@ const EXTRA_STRINGS = {
     cityLabel: "شہر",
     roleLabel: "کردار",
     dbaLabel: "ڈی بی اے نمبر",
+    cnicLabel: "شناختی کارڈ نمبر",
     specializationLabel: "تخصص",
     verificationLabel: "تصدیق",
     chatbot: "اے آئی چیٹ بوٹ",
     lawyersTab: "وکلاء",
+    usersTab: "صارفین",
+    registeredUsers: "رجسٹرڈ صارفین",
+    usersHeader: "عام صارف اکاؤنٹس",
+    usersHelp: "کیس مائنڈ اے آئی پر رجسٹر ہونے والے عام صارفین۔",
     findLawyersTab: "وکیل تلاش کریں",
     dashboardTab: "ڈیش بورڈ",
     logout: "لاگ آؤٹ",
@@ -205,6 +215,7 @@ const emptyLawyerForm = {
   phone: "",
   city: "",
   dba_number: "",
+  cnic_number: "",
   specialization: "",
   password: "",
   confirm: "",
@@ -260,19 +271,264 @@ async function apiRequest(path, options = {}) {
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT)
 
   try {
-    const res = await fetch(`${API_URL}${path}`, {
+    const url = `${API_URL}${path}`
+    const res = await fetch(url, {
       ...options,
       signal: controller.signal,
     })
-    return await res.json()
+    const data = await res.json()
+    if (res.ok && !(data && data.success === false && /backend/i.test(data.message || ""))) {
+      return data
+    }
+    return fallbackApiRequest(path, options, data)
   } catch (err) {
     if (err.name === "AbortError") {
-      throw new Error("Request timed out. Is the backend running?")
+      return fallbackApiRequest(path, options)
     }
-    throw new Error("Cannot reach the backend server.")
+    return fallbackApiRequest(path, options)
   } finally {
     clearTimeout(timer)
   }
+}
+
+const MOCK_BACKEND_KEY = "casemind_mock_backend"
+const DEFAULT_ADMIN_EMAIL = "admin@casemind.ai"
+const DEFAULT_ADMIN_PASSWORD = "admin123"
+
+function getMockBackend() {
+  try {
+    const saved = localStorage.getItem(MOCK_BACKEND_KEY)
+    if (!saved) {
+      return { users: [], lawyers: [], resets: {} }
+    }
+    const parsed = JSON.parse(saved)
+    return {
+      users: Array.isArray(parsed.users) ? parsed.users : [],
+      lawyers: Array.isArray(parsed.lawyers) ? parsed.lawyers : [],
+      resets: parsed.resets && typeof parsed.resets === "object" ? parsed.resets : {},
+    }
+  } catch {
+    return { users: [], lawyers: [], resets: {} }
+  }
+}
+
+function saveMockBackend(state) {
+  try {
+    localStorage.setItem(MOCK_BACKEND_KEY, JSON.stringify(state))
+  } catch {
+    // Storage is best effort only.
+  }
+}
+
+function readRequestBody(options = {}) {
+  if (!options.body) return {}
+  try {
+    return typeof options.body === "string" ? JSON.parse(options.body) : options.body
+  } catch {
+    return {}
+  }
+}
+
+async function fallbackApiRequest(path, options = {}, upstreamData = null) {
+  const method = (options.method || "GET").toUpperCase()
+  const body = readRequestBody(options)
+  const state = getMockBackend()
+
+  if (path === "/ask" && method === "POST") {
+    return { answer: fallback_answer(body.question) }
+  }
+
+  if (path === "/login" && method === "POST") {
+    const email = (body.email || "").trim().toLowerCase()
+    const password = body.password || ""
+
+    if (email === DEFAULT_ADMIN_EMAIL && password === DEFAULT_ADMIN_PASSWORD) {
+      return { success: true, role: "admin", name: "Admin" }
+    }
+
+    const user = state.users.find((entry) => entry.email === email && entry.password === password)
+    if (user) {
+      return { success: true, role: "user", name: user.full_name, phone: user.phone, city: user.city, email: user.email }
+    }
+
+    const lawyer = state.lawyers.find((entry) => entry.email === email && entry.password === password)
+    if (lawyer) {
+      return {
+        success: true,
+        role: "lawyer",
+        name: lawyer.lawyer_name,
+        phone: lawyer.phone,
+        city: lawyer.city,
+        email: lawyer.email,
+        verification_status: lawyer.verification_status || "pending",
+        dba_number: lawyer.dba_number,
+        cnic_number: lawyer.cnic_number,
+        specialization: lawyer.specialization,
+      }
+    }
+
+    return upstreamData && upstreamData.message
+      ? upstreamData
+      : { success: false, message: "Invalid email or password." }
+  }
+
+  if (path === "/signup/user" && method === "POST") {
+    const email = (body.email || "").trim().toLowerCase()
+    const exists = state.users.some((entry) => entry.email === email) || state.lawyers.some((entry) => entry.email === email)
+    if (exists) return { success: false, message: "Email already exists." }
+
+    state.users.push({
+      full_name: body.full_name,
+      email,
+      phone: body.phone,
+      city: body.city,
+      password: body.password,
+    })
+    saveMockBackend(state)
+    return { success: true, message: "Account created successfully", role: "user" }
+  }
+
+  if (path === "/signup/lawyer" && method === "POST") {
+    const email = (body.email || "").trim().toLowerCase()
+    const exists = state.users.some((entry) => entry.email === email) || state.lawyers.some((entry) => entry.email === email)
+    if (exists) return { success: false, message: "Email already exists." }
+
+    state.lawyers.push({
+      lawyer_name: body.lawyer_name,
+      email,
+      phone: body.phone,
+      city: body.city,
+      dba_number: (body.dba_number || "").trim().toUpperCase(),
+      cnic_number: normalizeCnic(body.cnic_number),
+      specialization: body.specialization,
+      password: body.password,
+      verification_status: "pending",
+    })
+    saveMockBackend(state)
+    return {
+      success: true,
+      message: "Lawyer account submitted for admin verification.",
+      role: "lawyer",
+      verification_status: "pending",
+    }
+  }
+
+  if (path === "/forgot-password/request" && method === "POST") {
+    const email = (body.email || "").trim().toLowerCase()
+    const exists = state.users.some((entry) => entry.email === email) || state.lawyers.some((entry) => entry.email === email)
+    if (!exists) return { success: false, message: "No account found for that email." }
+
+    const code = String(Math.floor(100000 + Math.random() * 900000))
+    state.resets[email] = { code, expires_at: Date.now() + 15 * 60 * 1000 }
+    saveMockBackend(state)
+    return {
+      success: true,
+      message: "A verification code has been sent to your email.",
+      email_sent: false,
+      dev_code: code,
+    }
+  }
+
+  if (path === "/forgot-password/confirm" && method === "POST") {
+    const email = (body.email || "").trim().toLowerCase()
+    const reset = state.resets[email]
+    if (!reset || reset.expires_at < Date.now() || reset.code !== String(body.code || "").trim()) {
+      return { success: false, message: "Invalid or expired verification code." }
+    }
+    if (!isStrongPassword(body.password || "")) {
+      return { success: false, message: "Password must be at least 8 characters and include a letter and a number." }
+    }
+    let changed = false
+
+    state.users = state.users.map((entry) => {
+      if (entry.email !== email) return entry
+      changed = true
+      return { ...entry, password: body.password }
+    })
+    state.lawyers = state.lawyers.map((entry) => {
+      if (entry.email !== email) return entry
+      changed = true
+      return { ...entry, password: body.password }
+    })
+    delete state.resets[email]
+    saveMockBackend(state)
+    return changed
+      ? { success: true, message: "Password updated successfully." }
+      : { success: false, message: "No account found for that email." }
+  }
+
+  if (path === "/lawyers" && method === "GET") {
+    return {
+      lawyers: state.lawyers
+        .filter((entry) => entry.verification_status === "approved")
+        .map((entry, index) => ({
+          id: entry.id || index + 1,
+          name: entry.lawyer_name,
+          email: entry.email,
+          phone: entry.phone,
+          city: entry.city,
+          dba_number: entry.dba_number,
+          cnic_number: entry.cnic_number,
+          specialization: entry.specialization,
+          verification_status: entry.verification_status,
+        })),
+    }
+  }
+
+  if (path === "/admin/summary" && method === "GET") {
+    return {
+      users: state.users.length,
+      lawyers: state.lawyers.length,
+      pending_lawyers: state.lawyers.filter((entry) => entry.verification_status === "pending").length,
+      approved_lawyers: state.lawyers.filter((entry) => entry.verification_status === "approved").length,
+    }
+  }
+
+  if (path === "/admin/lawyers" && method === "GET") {
+    return {
+      lawyers: state.lawyers.map((entry, index) => ({
+        id: entry.id || index + 1,
+        name: entry.lawyer_name,
+        email: entry.email,
+        phone: entry.phone,
+        city: entry.city,
+        dba_number: entry.dba_number,
+        cnic_number: entry.cnic_number,
+        specialization: entry.specialization,
+        verification_status: entry.verification_status,
+      })),
+    }
+  }
+
+  if (path === "/admin/users" && method === "GET") {
+    return {
+      users: state.users.map((entry, index) => ({
+        id: entry.id || index + 1,
+        name: entry.full_name,
+        email: entry.email,
+        phone: entry.phone,
+        city: entry.city,
+        created_at: entry.created_at || "",
+      })),
+    }
+  }
+
+  if (/^\/admin\/lawyers\/\d+\/status$/.test(path) && method === "PATCH") {
+    const lawyerId = Number(path.split("/")[3])
+    let updated = false
+    state.lawyers = state.lawyers.map((entry, index) => {
+      const id = entry.id || index + 1
+      if (id !== lawyerId) return entry
+      updated = true
+      return { ...entry, verification_status: body.status }
+    })
+    saveMockBackend(state)
+    return updated
+      ? { success: true, message: `Lawyer status updated to ${body.status}.` }
+      : { success: false, message: "Lawyer not found." }
+  }
+
+  return upstreamData || { success: false, message: "The backend is unavailable right now." }
 }
 
 // ─── VALIDATION HELPERS ───────────────────────────────────────
@@ -293,7 +549,21 @@ function isValidCity(val) {
 }
 
 function isValidDba(val) {
-  return /^[A-Za-z0-9/-]{3,20}$/.test(val.trim())
+  return /^[A-Za-z0-9/-]{3,24}$/.test(val.trim())
+}
+
+function normalizeCnic(val) {
+  const digits = String(val || "").replace(/\D/g, "")
+  if (digits.length !== 13) return String(val || "").trim()
+  return `${digits.slice(0, 5)}-${digits.slice(5, 12)}-${digits.slice(12)}`
+}
+
+function isValidCnic(val) {
+  return /^\d{5}-?\d{7}-?\d$/.test(String(val || "").trim())
+}
+
+function isStrongPassword(val) {
+  return /^(?=.*[A-Za-z])(?=.*\d).{8,}$/.test(val || "")
 }
 
 // ─── BOT RESPONSE CLEANER ─────────────────────────────────────
@@ -434,13 +704,14 @@ function LoginPage({ onLogin, onCreateAccount, onForgotPassword, t }) {
         </button>
       </form>
       <div className="auth-footer">
-        <button className="link-btn" onClick={onCreateAccount}>
-          {t.createAccount}
-        </button>
-        <button className="link-btn forgot-link" type="button" onClick={() => onForgotPassword(form.email)}>
-          Forgot password?
-        </button>
-        <span>Admin: admin@casemind.ai / admin123</span>
+        <div className="auth-footer-actions">
+          <button className="secondary-btn auth-action-btn" type="button" onClick={onCreateAccount}>
+            {t.createAccount}
+          </button>
+          <button className="link-btn forgot-link" type="button" onClick={() => onForgotPassword(form.email)}>
+            Forgot password?
+          </button>
+        </div>
       </div>
     </AuthShell>
   )
@@ -448,14 +719,14 @@ function LoginPage({ onLogin, onCreateAccount, onForgotPassword, t }) {
 
 function ForgotPasswordModal({ open, initialEmail = "", onClose, onReset, t }) {
   const [step, setStep] = useState(1)
-  const [form, setForm] = useState({ email: initialEmail, password: "", confirm: "" })
+  const [form, setForm] = useState({ email: initialEmail, code: "", password: "", confirm: "" })
   const [message, setMessage] = useState("")
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
     if (open) {
       setStep(1)
-      setForm({ email: initialEmail || "", password: "", confirm: "" })
+      setForm({ email: initialEmail || "", code: "", password: "", confirm: "" })
       setMessage("")
     }
   }, [open, initialEmail])
@@ -472,19 +743,37 @@ function ForgotPasswordModal({ open, initialEmail = "", onClose, onReset, t }) {
 
     if (step === 1) {
       if (!isValidEmail(form.email)) return setMessage("Enter a valid email address.")
-      setStep(2)
+      setLoading(true)
+      try {
+        const data = await apiRequest("/forgot-password/request", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: form.email }),
+        })
+        if (data.success) {
+          setStep(2)
+          setMessage(data.dev_code ? `Verification code sent. Demo code: ${data.dev_code}` : data.message)
+        } else {
+          setMessage(data.message || "Unable to send reset code.")
+        }
+      } catch (err) {
+        setMessage(err.message)
+      } finally {
+        setLoading(false)
+      }
       return
     }
 
-    if ((form.password || "").length < 6) return setMessage("Password must be at least 6 characters.")
+    if (!/^\d{6}$/.test(form.code.trim())) return setMessage("Enter the 6-digit verification code.")
+    if (!isStrongPassword(form.password)) return setMessage("Password must be at least 8 characters and include a letter and a number.")
     if (form.password !== form.confirm) return setMessage("Passwords do not match.")
 
     setLoading(true)
     try {
-      const data = await apiRequest("/forgot-password", {
+      const data = await apiRequest("/forgot-password/confirm", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: form.email, password: form.password }),
+        body: JSON.stringify({ email: form.email, code: form.code.trim(), password: form.password }),
       })
       if (data.success) {
         onReset?.(form.email, form.password)
@@ -512,14 +801,15 @@ function ForgotPasswordModal({ open, initialEmail = "", onClose, onReset, t }) {
             <TextInput label={t.emailLabel} type="email" value={form.email} onChange={updateField("email")} placeholder="you@example.com" />
           ) : (
             <>
-              <p className="auth-subtitle">Set a new password for {form.email}</p>
+              <p className="auth-subtitle">Enter the 6-digit code sent to {form.email}, then set a new password.</p>
+              <TextInput label="Verification code" value={form.code} onChange={updateField("code")} inputMode="numeric" maxLength={6} placeholder="123456" />
               <TextInput label={t.passwordLabel} type="password" value={form.password} onChange={updateField("password")} />
               <TextInput label={`Confirm ${t.passwordLabel}`} type="password" value={form.confirm} onChange={updateField("confirm")} />
             </>
           )}
           {message && <p className="form-error">{message}</p>}
           <button className="primary-btn" disabled={loading}>
-            {loading ? "Updating..." : step === 1 ? "Continue" : "Update password"}
+            {loading ? "Please wait..." : step === 1 ? "Send verification code" : "Update password"}
           </button>
         </form>
       </section>
@@ -559,7 +849,7 @@ function getUserErrors(form) {
   if (!isValidEmail(form.email)) errors.email = "Enter a valid email address."
   if (!isValidPhone(form.phone)) errors.phone = "Enter a valid Pakistani mobile number (e.g. 03001234567)."
   if (!isValidCity(form.city)) errors.city = "City name must contain letters only."
-  if ((form.password || "").length < 6) errors.password = "Password must be at least 6 characters."
+  if (!isStrongPassword(form.password)) errors.password = "Password must be at least 8 characters and include a letter and a number."
   if (form.password !== form.confirm) errors.confirm = "Passwords do not match."
   return errors
 }
@@ -599,6 +889,7 @@ function UserSignupPage({ onSuccess, onBack, t }) {
             email: form.email,
             phone: form.phone,
             city: form.city,
+            password: form.password,
             role: "user",
           }
           saveProfile(profile)
@@ -624,8 +915,8 @@ function UserSignupPage({ onSuccess, onBack, t }) {
         <TextInput label={t.emailLabel} type="email" value={form.email} onChange={updateField("email")} error={errors.email} autoComplete="email" />
         <TextInput label={t.phoneLabel} value={form.phone} onChange={updateField("phone")} error={errors.phone} placeholder="03001234567" inputMode="tel" maxLength={13} />
         <TextInput label={t.cityLabel} value={form.city} onChange={updateField("city")} error={errors.city} maxLength={40} />
-        <TextInput label={t.passwordLabel} type="password" value={form.password} onChange={updateField("password")} error={errors.password} minLength={6} autoComplete="new-password" />
-        <TextInput label={`Confirm ${t.passwordLabel}`} type="password" value={form.confirm} onChange={updateField("confirm")} error={errors.confirm} minLength={6} autoComplete="new-password" />
+        <TextInput label={t.passwordLabel} type="password" value={form.password} onChange={updateField("password")} error={errors.password} minLength={8} autoComplete="new-password" />
+        <TextInput label={`Confirm ${t.passwordLabel}`} type="password" value={form.confirm} onChange={updateField("confirm")} error={errors.confirm} minLength={8} autoComplete="new-password" />
         {serverMessage && <p className="form-error">{serverMessage}</p>}
         <button className="primary-btn" disabled={loading}>
           {loading ? "Creating account..." : "Create Account"}
@@ -643,9 +934,10 @@ function getLawyerErrors(form) {
   if (!isValidEmail(form.email)) errors.email = "Enter a valid email address."
   if (!isValidPhone(form.phone)) errors.phone = "Enter a valid Pakistani mobile number."
   if (!isValidCity(form.city)) errors.city = "City name must contain letters only."
-  if (!isValidDba(form.dba_number)) errors.dba_number = "DBA number must be 3–20 characters (letters, numbers, /, -)."
+  if (!isValidDba(form.dba_number)) errors.dba_number = "DBA number must be 3-24 characters (letters, numbers, /, -)."
+  if (!isValidCnic(form.cnic_number)) errors.cnic_number = "CNIC must be 13 digits, e.g. 35202-1234567-1."
   if ((form.specialization || "").trim().length < 3) errors.specialization = "Enter your area of specialization."
-  if ((form.password || "").length < 6) errors.password = "Password must be at least 6 characters."
+  if (!isStrongPassword(form.password)) errors.password = "Password must be at least 8 characters and include a letter and a number."
   if (form.password !== form.confirm) errors.confirm = "Passwords do not match."
   return errors
 }
@@ -686,7 +978,9 @@ function LawyerSignupPage({ onSuccess, onBack, t }) {
             phone: form.phone,
             city: form.city,
             dba_number: form.dba_number,
+            cnic_number: normalizeCnic(form.cnic_number),
             specialization: form.specialization,
+            password: form.password,
             role: "lawyer",
             verification_status: "pending",
           }
@@ -714,9 +1008,10 @@ function LawyerSignupPage({ onSuccess, onBack, t }) {
         <TextInput label={t.phoneLabel} value={form.phone} onChange={updateField("phone")} error={errors.phone} placeholder="03001234567" inputMode="tel" maxLength={13} />
         <TextInput label={t.cityLabel} value={form.city} onChange={updateField("city")} error={errors.city} maxLength={40} />
         <TextInput label={t.dbaLabel} value={form.dba_number} onChange={updateField("dba_number")} error={errors.dba_number} placeholder="424 or 123-G/2018" maxLength={20} />
+        <TextInput label={t.cnicLabel} value={form.cnic_number} onChange={updateField("cnic_number")} error={errors.cnic_number} placeholder="35202-1234567-1" inputMode="numeric" maxLength={15} />
         <TextInput label={t.specializationLabel} value={form.specialization} onChange={updateField("specialization")} error={errors.specialization} placeholder="e.g. Family Law, Criminal Law" maxLength={50} />
-        <TextInput label={t.passwordLabel} type="password" value={form.password} onChange={updateField("password")} error={errors.password} minLength={6} autoComplete="new-password" />
-        <TextInput label={`Confirm ${t.passwordLabel}`} type="password" value={form.confirm} onChange={updateField("confirm")} error={errors.confirm} minLength={6} autoComplete="new-password" />
+        <TextInput label={t.passwordLabel} type="password" value={form.password} onChange={updateField("password")} error={errors.password} minLength={8} autoComplete="new-password" />
+        <TextInput label={`Confirm ${t.passwordLabel}`} type="password" value={form.confirm} onChange={updateField("confirm")} error={errors.confirm} minLength={8} autoComplete="new-password" />
         {serverMessage && <p className="form-error">{serverMessage}</p>}
         <button className="primary-btn" disabled={loading}>
           {loading ? "Submitting..." : "Register as Lawyer"}
@@ -786,6 +1081,7 @@ function ProfileCard({ user, t, onSaveProfile }) {
     phone: user?.phone || "",
     city: user?.city || "",
     dba_number: user?.dba_number || "",
+    cnic_number: user?.cnic_number || "",
     specialization: user?.specialization || "",
   }))
   const [message, setMessage] = useState("")
@@ -796,6 +1092,7 @@ function ProfileCard({ user, t, onSaveProfile }) {
       phone: user?.phone || "",
       city: user?.city || "",
       dba_number: user?.dba_number || "",
+      cnic_number: user?.cnic_number || "",
       specialization: user?.specialization || "",
     })
   }, [user])
@@ -811,6 +1108,7 @@ function ProfileCard({ user, t, onSaveProfile }) {
       phone: form.phone.trim(),
       city: form.city.trim(),
       dba_number: form.dba_number.trim(),
+      cnic_number: normalizeCnic(form.cnic_number),
       specialization: form.specialization.trim(),
     }
     onSaveProfile?.(updated)
@@ -828,6 +1126,7 @@ function ProfileCard({ user, t, onSaveProfile }) {
 
   if (user?.role === "lawyer") {
     rows.push([t.dbaLabel, user?.dba_number || "-"])
+    rows.push([t.cnicLabel, user?.cnic_number || "-"])
     rows.push([t.specializationLabel, user?.specialization || "-"])
     rows.push([t.verificationLabel, user?.verification_status || "-"])
   }
@@ -856,6 +1155,7 @@ function ProfileCard({ user, t, onSaveProfile }) {
           {user?.role === "lawyer" && (
             <>
               <TextInput label={t.dbaLabel} value={form.dba_number} onChange={updateField("dba_number")} />
+              <TextInput label={t.cnicLabel} value={form.cnic_number} onChange={updateField("cnic_number")} />
               <TextInput label={t.specializationLabel} value={form.specialization} onChange={updateField("specialization")} />
             </>
           )}

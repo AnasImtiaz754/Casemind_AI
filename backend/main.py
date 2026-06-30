@@ -2,7 +2,11 @@ from pathlib import Path
 import hashlib
 import os
 import re
+import secrets
+import smtplib
 import sqlite3
+import time
+from email.message import EmailMessage
 
 import httpx
 from fastapi import FastAPI
@@ -19,6 +23,7 @@ app.add_middleware(
 )
 
 DB_PATH = Path(__file__).with_name("casemind.db")
+RESET_CODE_TTL_SECONDS = 15 * 60
 
 
 def load_local_env():
@@ -82,6 +87,7 @@ def init_db():
             phone TEXT,
             city TEXT,
             dba_number TEXT,
+            cnic_number TEXT,
             specialization TEXT,
             password TEXT NOT NULL,
             verification_status TEXT DEFAULT 'pending',
@@ -93,6 +99,17 @@ def init_db():
     columns = [row["name"] for row in cursor.fetchall()]
     if "verification_status" not in columns:
         cursor.execute("ALTER TABLE lawyers ADD COLUMN verification_status TEXT DEFAULT 'pending'")
+    if "cnic_number" not in columns:
+        cursor.execute("ALTER TABLE lawyers ADD COLUMN cnic_number TEXT")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS password_resets (
+            email TEXT PRIMARY KEY,
+            code_hash TEXT NOT NULL,
+            expires_at INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
     conn.commit()
     conn.close()
@@ -123,7 +140,27 @@ def valid_city(value):
 
 
 def valid_dba(value):
-    return re.match(r"^[A-Za-z0-9/-]{3,20}$", (value or "").strip()) is not None
+    return re.match(r"^[A-Za-z0-9/-]{3,24}$", (value or "").strip()) is not None
+
+
+def valid_cnic(value):
+    return re.match(r"^\d{5}-?\d{7}-?\d$", (value or "").strip()) is not None
+
+
+def normalize_cnic(value):
+    digits = re.sub(r"\D", "", value or "")
+    if len(digits) != 13:
+        return (value or "").strip()
+    return f"{digits[:5]}-{digits[5:12]}-{digits[12]}"
+
+
+def valid_password(value):
+    value = value or ""
+    return (
+        len(value) >= 8
+        and re.search(r"[A-Za-z]", value) is not None
+        and re.search(r"\d", value) is not None
+    )
 
 
 def validation_error(message):
@@ -139,9 +176,44 @@ def validate_common(name, email, phone, city, password):
         return "Enter a valid Pakistani mobile number."
     if not valid_city(city):
         return "City should contain letters only."
-    if len(password or "") < 6:
-        return "Password must be at least 6 characters."
+    if not valid_password(password):
+        return "Password must be at least 8 characters and include a letter and a number."
     return None
+
+
+def account_exists(cursor, email):
+    cursor.execute("SELECT 1 FROM users WHERE email=?", (email,))
+    if cursor.fetchone():
+        return True
+    cursor.execute("SELECT 1 FROM lawyers WHERE email=?", (email,))
+    return cursor.fetchone() is not None
+
+
+def send_reset_email(email, code):
+    host = os.getenv("SMTP_HOST", "").strip()
+    username = os.getenv("SMTP_USERNAME", "").strip()
+    password = os.getenv("SMTP_PASSWORD", "").strip()
+    sender = os.getenv("SMTP_FROM_EMAIL", username or "no-reply@casemind.ai").strip()
+    port = int(os.getenv("SMTP_PORT", "587"))
+
+    if not host or not username or not password:
+        print(f"Password reset code for {email}: {code}")
+        return False
+
+    message = EmailMessage()
+    message["Subject"] = "Your CaseMind AI password reset code"
+    message["From"] = sender
+    message["To"] = email
+    message.set_content(
+        f"Your CaseMind AI password reset code is {code}.\n\n"
+        "This code expires in 15 minutes. If you did not request it, ignore this email."
+    )
+
+    with smtplib.SMTP(host, port, timeout=12) as smtp:
+        smtp.starttls()
+        smtp.login(username, password)
+        smtp.send_message(message)
+    return True
 
 
 class UserSignup(BaseModel):
@@ -158,6 +230,7 @@ class LawyerSignup(BaseModel):
     phone: str
     city: str
     dba_number: str
+    cnic_number: str
     specialization: str
     password: str
 
@@ -167,8 +240,13 @@ class LoginData(BaseModel):
     password: str
 
 
-class ForgotPasswordData(BaseModel):
+class ForgotPasswordRequest(BaseModel):
     email: str
+
+
+class ForgotPasswordConfirm(BaseModel):
+    email: str
+    code: str
     password: str
 
 
@@ -223,12 +301,16 @@ def signup_user(data: UserSignup):
     try:
         conn = get_connection()
         cursor = conn.cursor()
+        email = data.email.strip().lower()
+        if account_exists(cursor, email):
+            conn.close()
+            return validation_error("Email already exists.")
         cursor.execute("""
             INSERT INTO users (full_name, email, phone, city, password)
             VALUES (?, ?, ?, ?, ?)
         """, (
             data.full_name.strip(),
-            data.email.strip().lower(),
+            email,
             data.phone.strip(),
             data.city.strip(),
             hash_password(data.password),
@@ -247,23 +329,30 @@ def signup_lawyer(data: LawyerSignup):
         return validation_error(error)
     if not valid_dba(data.dba_number):
         return validation_error("DBA number should contain only letters, numbers, slash, or dash.")
+    if not valid_cnic(data.cnic_number):
+        return validation_error("CNIC should use 13 digits, for example 35202-1234567-1.")
     if len(data.specialization.strip()) < 3:
         return validation_error("Enter a valid specialization.")
 
     try:
         conn = get_connection()
         cursor = conn.cursor()
+        email = data.email.strip().lower()
+        if account_exists(cursor, email):
+            conn.close()
+            return validation_error("Email already exists.")
         cursor.execute("""
             INSERT INTO lawyers (
-                lawyer_name, email, phone, city, dba_number, specialization, password, verification_status
+                lawyer_name, email, phone, city, dba_number, cnic_number, specialization, password, verification_status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
         """, (
             data.lawyer_name.strip(),
-            data.email.strip().lower(),
+            email,
             data.phone.strip(),
             data.city.strip(),
             data.dba_number.strip().upper(),
+            normalize_cnic(data.cnic_number),
             data.specialization.strip(),
             hash_password(data.password),
         ))
@@ -288,16 +377,27 @@ def login(data: LoginData):
     cursor = conn.cursor()
 
     cursor.execute(
-        "SELECT id, full_name FROM users WHERE email=? AND password=?",
+        "SELECT id, full_name, email, phone, city FROM users WHERE email=? AND password=?",
         (data.email.strip().lower(), hash_password(data.password)),
     )
     user = cursor.fetchone()
     if user:
         conn.close()
-        return {"success": True, "role": "user", "name": user["full_name"]}
+        return {
+            "success": True,
+            "role": "user",
+            "name": user["full_name"],
+            "email": user["email"],
+            "phone": user["phone"],
+            "city": user["city"],
+        }
 
     cursor.execute(
-        "SELECT id, lawyer_name, verification_status FROM lawyers WHERE email=? AND password=?",
+        """
+        SELECT id, lawyer_name, email, phone, city, dba_number, cnic_number, specialization, verification_status
+        FROM lawyers
+        WHERE email=? AND password=?
+        """,
         (data.email.strip().lower(), hash_password(data.password)),
     )
     lawyer = cursor.fetchone()
@@ -307,6 +407,12 @@ def login(data: LoginData):
             "success": True,
             "role": "lawyer",
             "name": lawyer["lawyer_name"],
+            "email": lawyer["email"],
+            "phone": lawyer["phone"],
+            "city": lawyer["city"],
+            "dba_number": lawyer["dba_number"],
+            "cnic_number": lawyer["cnic_number"],
+            "specialization": lawyer["specialization"],
             "verification_status": lawyer["verification_status"],
         }
 
@@ -314,29 +420,75 @@ def login(data: LoginData):
     return {"success": False, "message": "Invalid email or password."}
 
 
-@app.post("/forgot-password")
-def forgot_password(data: ForgotPasswordData):
+@app.post("/forgot-password/request")
+def request_password_reset(data: ForgotPasswordRequest):
     if not valid_email(data.email):
         return validation_error("Enter a valid email address.")
-    if len(data.password or "") < 6:
-        return validation_error("Password must be at least 6 characters.")
 
     conn = get_connection()
     cursor = conn.cursor()
-
     email = data.email.strip().lower()
-    hashed = hash_password(data.password)
+    if not account_exists(cursor, email):
+        conn.close()
+        return validation_error("No account found for that email.")
 
+    code = f"{secrets.randbelow(900000) + 100000}"
+    cursor.execute(
+        """
+        INSERT OR REPLACE INTO password_resets (email, code_hash, expires_at)
+        VALUES (?, ?, ?)
+        """,
+        (email, hash_password(code), int(time.time()) + RESET_CODE_TTL_SECONDS),
+    )
+    conn.commit()
+    conn.close()
+
+    email_sent = send_reset_email(email, code)
+    response = {
+        "success": True,
+        "message": "A verification code has been sent to your email.",
+        "email_sent": email_sent,
+    }
+    if os.getenv("CASEMIND_EXPOSE_RESET_CODE", "").lower() == "true":
+        response["dev_code"] = code
+    return response
+
+
+@app.post("/forgot-password/confirm")
+def confirm_password_reset(data: ForgotPasswordConfirm):
+    if not valid_email(data.email):
+        return validation_error("Enter a valid email address.")
+    if not re.match(r"^\d{6}$", data.code or ""):
+        return validation_error("Enter the 6-digit verification code.")
+    if not valid_password(data.password):
+        return validation_error("Password must be at least 8 characters and include a letter and a number.")
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    email = data.email.strip().lower()
+    cursor.execute("SELECT code_hash, expires_at FROM password_resets WHERE email=?", (email,))
+    reset = cursor.fetchone()
+    if not reset or reset["expires_at"] < int(time.time()) or reset["code_hash"] != hash_password(data.code):
+        conn.close()
+        return validation_error("Invalid or expired verification code.")
+
+    hashed = hash_password(data.password)
     cursor.execute("UPDATE users SET password=? WHERE email=?", (hashed, email))
     user_changed = cursor.rowcount
     cursor.execute("UPDATE lawyers SET password=? WHERE email=?", (hashed, email))
     lawyer_changed = cursor.rowcount
+    cursor.execute("DELETE FROM password_resets WHERE email=?", (email,))
     conn.commit()
     conn.close()
 
     if not user_changed and not lawyer_changed:
         return validation_error("No account found for that email.")
     return {"success": True, "message": "Password updated successfully."}
+
+
+@app.post("/forgot-password")
+def forgot_password_legacy():
+    return validation_error("Use the email verification flow to reset your password.")
 
 
 def lawyer_dict(row):
@@ -347,8 +499,20 @@ def lawyer_dict(row):
         "phone": row["phone"],
         "city": row["city"],
         "dba_number": row["dba_number"],
+        "cnic_number": row["cnic_number"],
         "specialization": row["specialization"],
         "verification_status": row["verification_status"],
+    }
+
+
+def user_dict(row):
+    return {
+        "id": row["id"],
+        "name": row["full_name"],
+        "email": row["email"],
+        "phone": row["phone"],
+        "city": row["city"],
+        "created_at": row["created_at"],
     }
 
 
@@ -357,7 +521,7 @@ def get_lawyers():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT id, lawyer_name, email, phone, city, dba_number, specialization, verification_status
+        SELECT id, lawyer_name, email, phone, city, dba_number, cnic_number, specialization, verification_status
         FROM lawyers
         WHERE verification_status='approved'
         ORDER BY lawyer_name
@@ -393,13 +557,27 @@ def admin_lawyers():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT id, lawyer_name, email, phone, city, dba_number, specialization, verification_status
+        SELECT id, lawyer_name, email, phone, city, dba_number, cnic_number, specialization, verification_status
         FROM lawyers
         ORDER BY created_at DESC
     """)
     rows = cursor.fetchall()
     conn.close()
     return {"lawyers": [lawyer_dict(row) for row in rows]}
+
+
+@app.get("/admin/users")
+def admin_users():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, full_name, email, phone, city, created_at
+        FROM users
+        ORDER BY created_at DESC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+    return {"users": [user_dict(row) for row in rows]}
 
 
 @app.patch("/admin/lawyers/{lawyer_id}/status")
