@@ -24,7 +24,6 @@ app.add_middleware(
 
 DB_PATH = Path(__file__).with_name("casemind.db")
 RESET_CODE_TTL_SECONDS = 15 * 60
-AUTH_CODE_TTL_SECONDS = 10 * 60
 
 
 def load_local_env():
@@ -107,16 +106,6 @@ def init_db():
         CREATE TABLE IF NOT EXISTS password_resets (
             email TEXT PRIMARY KEY,
             code_hash TEXT NOT NULL,
-            expires_at INTEGER NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS auth_otps (
-            email TEXT PRIMARY KEY,
-            code_hash TEXT NOT NULL,
-            purpose TEXT NOT NULL,
             expires_at INTEGER NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -227,33 +216,6 @@ def send_reset_email(email, code):
     return True
 
 
-def send_auth_otp_email(email, code, purpose):
-    host = os.getenv("SMTP_HOST", "").strip()
-    username = os.getenv("SMTP_USERNAME", "").strip()
-    password = os.getenv("SMTP_PASSWORD", "").strip()
-    sender = os.getenv("SMTP_FROM_EMAIL", username or "no-reply@casemind.ai").strip()
-    port = int(os.getenv("SMTP_PORT", "587"))
-
-    if not host or not username or not password:
-        print(f"CaseMind {purpose} verification code for {email}: {code}")
-        return False
-
-    message = EmailMessage()
-    message["Subject"] = "Your CaseMind AI verification code"
-    message["From"] = sender
-    message["To"] = email
-    message.set_content(
-        f"Your CaseMind AI verification code is {code}.\n\n"
-        "This code expires in 10 minutes. If you did not request it, ignore this email."
-    )
-
-    with smtplib.SMTP(host, port, timeout=12) as smtp:
-        smtp.starttls()
-        smtp.login(username, password)
-        smtp.send_message(message)
-    return True
-
-
 class UserSignup(BaseModel):
     full_name: str
     email: str
@@ -276,18 +238,6 @@ class LawyerSignup(BaseModel):
 class LoginData(BaseModel):
     email: str
     password: str
-
-
-class AuthOtpRequest(BaseModel):
-    email: str
-    purpose: str = "signup"
-    provider: str = "email"
-
-
-class AuthOtpVerify(BaseModel):
-    email: str
-    code: str
-    purpose: str = "signup"
 
 
 class ForgotPasswordRequest(BaseModel):
@@ -468,122 +418,6 @@ def login(data: LoginData):
 
     conn.close()
     return {"success": False, "message": "Invalid email or password."}
-
-
-@app.post("/auth/otp/request")
-def request_auth_otp(data: AuthOtpRequest):
-    if not valid_email(data.email):
-        return validation_error("Enter a valid email address.")
-    if data.purpose not in {"signup", "login"}:
-        return validation_error("Invalid verification purpose.")
-
-    conn = get_connection()
-    cursor = conn.cursor()
-    email = data.email.strip().lower()
-    exists = account_exists(cursor, email)
-    if data.purpose == "signup" and exists:
-        conn.close()
-        return validation_error("Email already exists.")
-    if data.purpose == "login" and not exists:
-        conn.close()
-        return validation_error("No account found for that email.")
-
-    code = f"{secrets.randbelow(900000) + 100000}"
-    cursor.execute(
-        """
-        INSERT OR REPLACE INTO auth_otps (email, code_hash, purpose, expires_at)
-        VALUES (?, ?, ?, ?)
-        """,
-        (email, hash_password(code), data.purpose, int(time.time()) + AUTH_CODE_TTL_SECONDS),
-    )
-    conn.commit()
-    conn.close()
-
-    email_sent = send_auth_otp_email(email, code, data.purpose)
-    response = {
-        "success": True,
-        "message": "A one-time verification code has been sent to your email.",
-        "email_sent": email_sent,
-    }
-    if os.getenv("CASEMIND_EXPOSE_RESET_CODE", "").lower() == "true":
-        response["dev_code"] = code
-    return response
-
-
-@app.post("/auth/otp/verify")
-def verify_auth_otp(data: AuthOtpVerify):
-    if not valid_email(data.email):
-        return validation_error("Enter a valid email address.")
-    if data.purpose not in {"signup", "login"}:
-        return validation_error("Invalid verification purpose.")
-    if not re.match(r"^\d{6}$", data.code or ""):
-        return validation_error("Enter the 6-digit verification code.")
-
-    conn = get_connection()
-    cursor = conn.cursor()
-    email = data.email.strip().lower()
-    cursor.execute("SELECT code_hash, purpose, expires_at FROM auth_otps WHERE email=?", (email,))
-    otp = cursor.fetchone()
-    if not otp or otp["purpose"] != data.purpose or otp["expires_at"] < int(time.time()) or otp["code_hash"] != hash_password(data.code):
-        conn.close()
-        return validation_error("Invalid or expired verification code.")
-    if data.purpose == "signup":
-        cursor.execute("DELETE FROM auth_otps WHERE email=?", (email,))
-    conn.commit()
-    conn.close()
-    return {"success": True, "message": "Email verified successfully."}
-
-
-@app.post("/login/otp")
-def login_with_otp(data: AuthOtpVerify):
-    verified = verify_auth_otp(AuthOtpVerify(email=data.email, code=data.code, purpose="login"))
-    if not verified.get("success"):
-        return verified
-
-    email = data.email.strip().lower()
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM auth_otps WHERE email=?", (email,))
-
-    cursor.execute("SELECT id, full_name, email, phone, city FROM users WHERE email=?", (email,))
-    user = cursor.fetchone()
-    if user:
-        conn.commit()
-        conn.close()
-        return {
-            "success": True,
-            "role": "user",
-            "name": user["full_name"],
-            "email": user["email"],
-            "phone": user["phone"],
-            "city": user["city"],
-            "auth_provider": "email_otp",
-        }
-
-    cursor.execute("""
-        SELECT id, lawyer_name, email, phone, city, dba_number, cnic_number, specialization, verification_status
-        FROM lawyers
-        WHERE email=?
-    """, (email,))
-    lawyer = cursor.fetchone()
-    conn.commit()
-    conn.close()
-    if lawyer:
-        return {
-            "success": True,
-            "role": "lawyer",
-            "name": lawyer["lawyer_name"],
-            "email": lawyer["email"],
-            "phone": lawyer["phone"],
-            "city": lawyer["city"],
-            "dba_number": lawyer["dba_number"],
-            "cnic_number": lawyer["cnic_number"],
-            "specialization": lawyer["specialization"],
-            "verification_status": lawyer["verification_status"],
-            "auth_provider": "email_otp",
-        }
-
-    return validation_error("No account found for that email.")
 
 
 @app.post("/forgot-password/request")

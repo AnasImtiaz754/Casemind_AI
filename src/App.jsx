@@ -292,7 +292,6 @@ async function apiRequest(path, options = {}) {
 }
 
 const MOCK_BACKEND_KEY = "casemind_mock_backend"
-const AUTH_OTP_KEY = "casemind_auth_otps"
 const DEFAULT_ADMIN_EMAIL = "admin@casemind.ai"
 const DEFAULT_ADMIN_PASSWORD = "admin123"
 
@@ -319,44 +318,6 @@ function saveMockBackend(state) {
   } catch {
     // Storage is best effort only.
   }
-}
-
-function getAuthOtps() {
-  try {
-    const saved = localStorage.getItem(AUTH_OTP_KEY)
-    return saved ? JSON.parse(saved) : {}
-  } catch {
-    return {}
-  }
-}
-
-function saveAuthOtps(state) {
-  try {
-    localStorage.setItem(AUTH_OTP_KEY, JSON.stringify(state))
-  } catch {
-    // OTP persistence is best effort in the browser fallback.
-  }
-}
-
-function issueAuthOtp(email, purpose = "signup") {
-  const normalized = (email || "").trim().toLowerCase()
-  const code = String(Math.floor(100000 + Math.random() * 900000))
-  const otps = getAuthOtps()
-  otps[normalized] = { code, purpose, expires_at: Date.now() + 10 * 60 * 1000 }
-  saveAuthOtps(otps)
-  return code
-}
-
-function verifyAuthOtp(email, code, purpose = "signup") {
-  const normalized = (email || "").trim().toLowerCase()
-  const otps = getAuthOtps()
-  const record = otps[normalized]
-  if (!record || record.purpose !== purpose || record.expires_at < Date.now() || record.code !== String(code || "").trim()) {
-    return false
-  }
-  delete otps[normalized]
-  saveAuthOtps(otps)
-  return true
 }
 
 function readRequestBody(options = {}) {
@@ -496,61 +457,6 @@ async function fallbackApiRequest(path, options = {}, upstreamData = null) {
       : { success: false, message: "No account found for that email." }
   }
 
-  if (path === "/auth/otp/request" && method === "POST") {
-    const email = (body.email || "").trim().toLowerCase()
-    const purpose = body.purpose || "signup"
-    if (!isValidEmail(email)) return { success: false, message: "Enter a valid email address." }
-    const exists = state.users.some((entry) => entry.email === email) || state.lawyers.some((entry) => entry.email === email)
-    if (purpose === "login" && !exists) return { success: false, message: "No account found for that email." }
-    if (purpose === "signup" && exists) return { success: false, message: "Email already exists." }
-    const code = issueAuthOtp(email, purpose)
-    return {
-      success: true,
-      message: "A one-time verification code has been sent to your email.",
-      email_sent: false,
-      dev_code: code,
-    }
-  }
-
-  if (path === "/auth/otp/verify" && method === "POST") {
-    const email = (body.email || "").trim().toLowerCase()
-    const purpose = body.purpose || "signup"
-    const verified = verifyAuthOtp(email, body.code, purpose)
-    return verified
-      ? { success: true, message: "Email verified successfully." }
-      : { success: false, message: "Invalid or expired verification code." }
-  }
-
-  if (path === "/login/otp" && method === "POST") {
-    const email = (body.email || "").trim().toLowerCase()
-    const verified = verifyAuthOtp(email, body.code, "login")
-    if (!verified) return { success: false, message: "Invalid or expired verification code." }
-
-    const user = state.users.find((entry) => entry.email === email)
-    if (user) {
-      return { success: true, role: "user", name: user.full_name, phone: user.phone, city: user.city, email: user.email, auth_provider: "email_otp" }
-    }
-
-    const lawyer = state.lawyers.find((entry) => entry.email === email)
-    if (lawyer) {
-      return {
-        success: true,
-        role: "lawyer",
-        name: lawyer.lawyer_name,
-        phone: lawyer.phone,
-        city: lawyer.city,
-        email: lawyer.email,
-        verification_status: lawyer.verification_status || "pending",
-        dba_number: lawyer.dba_number,
-        cnic_number: lawyer.cnic_number,
-        specialization: lawyer.specialization,
-        auth_provider: "email_otp",
-      }
-    }
-
-    return { success: false, message: "No account found for that email." }
-  }
-
   if (path === "/lawyers" && method === "GET") {
     return {
       lawyers: state.lawyers
@@ -623,6 +529,40 @@ async function fallbackApiRequest(path, options = {}, upstreamData = null) {
   }
 
   return upstreamData || { success: false, message: "The backend is unavailable right now." }
+}
+
+function fallback_answer(question = "") {
+  const text = String(question || "").toLowerCase()
+
+  if (["theft", "steal", "stolen", "robbery"].some((word) => text.includes(word))) {
+    return [
+      "This sounds like a possible theft or property offence under Pakistani law.",
+      "Write down the full timeline, keep proof such as receipts, messages, CCTV, witnesses, and report the matter to the police as soon as possible.",
+      "If the issue is urgent or high-value, speak to a licensed lawyer before taking formal action.",
+    ].join("\n\n")
+  }
+
+  if (["divorce", "khula", "talaq", "custody", "maintenance"].some((word) => text.includes(word))) {
+    return [
+      "Family-law matters in Pakistan depend on the exact issue, such as talaq, khula, child custody, or maintenance.",
+      "Keep your marriage documents, notices, identity documents, and financial records together.",
+      "A family lawyer can guide you on the correct court process and documents for your situation.",
+    ].join("\n\n")
+  }
+
+  if (["property", "land", "rent", "tenant", "lease"].some((word) => text.includes(word))) {
+    return [
+      "Property and tenancy disputes usually depend on ownership documents, possession history, payment proof, and the written agreement.",
+      "Keep sale deeds, registry documents, rent agreements, receipts, and messages in one place.",
+      "For notices, possession issues, or active litigation, consult a licensed lawyer.",
+    ].join("\n\n")
+  }
+
+  return [
+    "I cannot reach the AI service right now, so here is a general legal guidance fallback.",
+    "Share the key facts, collect documents, avoid acting only on informal advice, and check deadlines carefully.",
+    "For anything formal, urgent, or risky, consult a licensed lawyer in Pakistan.",
+  ].join("\n\n")
 }
 
 // ─── VALIDATION HELPERS ───────────────────────────────────────
@@ -731,9 +671,7 @@ function AuthShell({ title, subtitle, children, t }) {
 // ─── LOGIN PAGE ───────────────────────────────────────────────
 function LoginPage({ onLogin, onCreateAccount, onForgotPassword, t }) {
   const [form, setForm] = useState({ email: "", password: "" })
-  const [otpForm, setOtpForm] = useState({ email: "", code: "" })
-  const [loginMethod, setLoginMethod] = useState("email")
-  const [otpStep, setOtpStep] = useState(1)
+  const [authMethod, setAuthMethod] = useState("google")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
@@ -762,12 +700,12 @@ function LoginPage({ onLogin, onCreateAccount, onForgotPassword, t }) {
       const data = await apiRequest("/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, auth_provider: authMethod }),
       })
 
       if (data.success) {
-        const profile = loadProfile(form.email) || { email: form.email, name: data.name, role: data.role }
-        onLogin(mergeProfile(profile, data))
+        const profile = loadProfile(form.email) || { email: form.email, name: data.name, role: data.role, auth_provider: authMethod }
+        onLogin(mergeProfile(profile, { ...data, auth_provider: authMethod }))
       } else {
         setError(data.message || "Invalid email or password.")
       }
@@ -778,125 +716,36 @@ function LoginPage({ onLogin, onCreateAccount, onForgotPassword, t }) {
     }
   }
 
-  async function requestLoginOtp(provider = "email") {
-    if (!isValidEmail(otpForm.email)) {
-      setError("Please enter a valid email address.")
-      return
-    }
-
-    setLoading(true)
-    setError("")
-    try {
-      const data = await apiRequest("/auth/otp/request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: otpForm.email, purpose: "login", provider }),
-      })
-      if (data.success) {
-        setOtpStep(2)
-        setError(data.dev_code ? `Verification code sent. Demo code: ${data.dev_code}` : data.message)
-      } else {
-        setError(data.message || "Unable to send verification code.")
-      }
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function handleOtpLogin(e) {
-    e.preventDefault()
-    if (!/^\d{6}$/.test(otpForm.code.trim())) {
-      setError("Enter the 6-digit verification code.")
-      return
-    }
-
-    setLoading(true)
-    setError("")
-    try {
-      const data = await apiRequest("/login/otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: otpForm.email, code: otpForm.code.trim() }),
-      })
-      if (data.success) {
-        const profile = loadProfile(otpForm.email) || { email: otpForm.email, name: data.name, role: data.role }
-        onLogin(mergeProfile(profile, data))
-      } else {
-        setError(data.message || "Unable to verify login.")
-      }
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
   return (
     <AuthShell title={t.loginTitle} subtitle={t.loginSubtitle} t={t}>
-      <div className="auth-methods">
-        <button type="button" className={loginMethod === "google" ? "method-btn active" : "method-btn"} onClick={() => { setLoginMethod("google"); setOtpStep(1); setError("") }}>
-          Continue with Google
+      <div className="auth-methods" aria-label="Sign in method">
+        <button type="button" className={authMethod === "google" ? "method-btn active" : "method-btn"} onClick={() => setAuthMethod("google")}>
+          Google
         </button>
-        <button type="button" className={loginMethod === "email" ? "method-btn active" : "method-btn"} onClick={() => { setLoginMethod("email"); setError("") }}>
-          Continue with email
+        <button type="button" className={authMethod === "email" ? "method-btn active" : "method-btn"} onClick={() => setAuthMethod("email")}>
+          Email
         </button>
       </div>
-
-      {loginMethod === "email" ? (
-        <form onSubmit={handleLogin} className="form-stack">
-          <TextInput
-            label={t.emailLabel}
-            type="email"
-            value={form.email}
-            onChange={updateField("email")}
-            placeholder="you@example.com"
-          />
-          <TextInput
-            label={t.passwordLabel}
-            type="password"
-            value={form.password}
-            onChange={updateField("password")}
-            placeholder="Enter your password"
-          />
-          {error && <p className="form-error">{error}</p>}
-          <button className="primary-btn" type="submit" disabled={loading}>
-            {loading ? `${t.signIn}...` : t.signIn}
-          </button>
-        </form>
-      ) : (
-        <form onSubmit={handleOtpLogin} className="form-stack">
-          <p className="auth-note">Use your Google email. We will verify it with a one-time code.</p>
-          <TextInput
-            label={t.emailLabel}
-            type="email"
-            value={otpForm.email}
-            onChange={(e) => setOtpForm((current) => ({ ...current, email: e.target.value }))}
-            placeholder="you@gmail.com"
-          />
-          {otpStep === 2 && (
-            <TextInput
-              label="Verification code"
-              value={otpForm.code}
-              onChange={(e) => setOtpForm((current) => ({ ...current, code: e.target.value }))}
-              inputMode="numeric"
-              maxLength={6}
-              placeholder="123456"
-            />
-          )}
-          {error && <p className="form-error">{error}</p>}
-          {otpStep === 1 ? (
-            <button className="primary-btn" type="button" disabled={loading} onClick={() => requestLoginOtp("google")}>
-              {loading ? "Sending code..." : "Send OTP"}
-            </button>
-          ) : (
-            <button className="primary-btn" type="submit" disabled={loading}>
-              {loading ? "Verifying..." : "Verify and login"}
-            </button>
-          )}
-        </form>
-      )}
+      <form onSubmit={handleLogin} className="form-stack">
+        <TextInput
+          label={authMethod === "google" ? "Google email" : t.emailLabel}
+          type="email"
+          value={form.email}
+          onChange={updateField("email")}
+          placeholder={authMethod === "google" ? "you@gmail.com" : "you@example.com"}
+        />
+        <TextInput
+          label={t.passwordLabel}
+          type="password"
+          value={form.password}
+          onChange={updateField("password")}
+          placeholder="Enter your password"
+        />
+        {error && <p className="form-error">{error}</p>}
+        <button className="primary-btn" type="submit" disabled={loading}>
+          {loading ? `${t.signIn}...` : t.signIn}
+        </button>
+      </form>
       <div className="auth-footer">
         <div className="auth-footer-actions">
           <button className="secondary-btn auth-action-btn" type="button" onClick={onCreateAccount}>
@@ -1013,7 +862,7 @@ function ForgotPasswordModal({ open, initialEmail = "", onClose, onReset, t }) {
 
 // ─── CHOOSE ROLE PAGE ─────────────────────────────────────────
 function ChooseRolePage({ onChoose, onBack, t }) {
-  const [method, setMethod] = useState("email")
+  const [authMethod, setAuthMethod] = useState("google")
 
   return (
     <AuthShell
@@ -1021,20 +870,20 @@ function ChooseRolePage({ onChoose, onBack, t }) {
       subtitle={t.chooseRoleSubtitle}
       t={t}
     >
-      <div className="auth-methods">
-        <button type="button" className={method === "google" ? "method-btn active" : "method-btn"} onClick={() => setMethod("google")}>
-          Create with Google
+      <div className="auth-methods" aria-label="Account creation method">
+        <button type="button" className={authMethod === "google" ? "method-btn active" : "method-btn"} onClick={() => setAuthMethod("google")}>
+          Google
         </button>
-        <button type="button" className={method === "email" ? "method-btn active" : "method-btn"} onClick={() => setMethod("email")}>
-          Create with email
+        <button type="button" className={authMethod === "email" ? "method-btn active" : "method-btn"} onClick={() => setAuthMethod("email")}>
+          Email
         </button>
       </div>
       <div className="role-grid">
-        <button className="role-card" onClick={() => onChoose("user", method)}>
+        <button className="role-card" onClick={() => onChoose("user", authMethod)}>
           <strong>{t.chooseRoleUser}</strong>
           <span>{t.chooseRoleUserDesc}</span>
         </button>
-        <button className="role-card" onClick={() => onChoose("lawyer", method)}>
+        <button className="role-card" onClick={() => onChoose("lawyer", authMethod)}>
           <strong>{t.chooseRoleLawyer}</strong>
           <span>{t.chooseRoleLawyerDesc}</span>
         </button>
@@ -1063,8 +912,6 @@ function UserSignupPage({ onSuccess, onBack, t, authMethod = "email" }) {
   const [errors, setErrors] = useState({})
   const [serverMessage, setServerMessage] = useState("")
   const [loading, setLoading] = useState(false)
-  const [otpStep, setOtpStep] = useState(1)
-  const [otpCode, setOtpCode] = useState("")
 
   function updateField(field) {
     return function (e) {
@@ -1072,7 +919,7 @@ function UserSignupPage({ onSuccess, onBack, t, authMethod = "email" }) {
     }
   }
 
-  async function requestSignupOtp(e) {
+  async function handleSubmit(e) {
     e.preventDefault()
 
     const fieldErrors = getUserErrors(form)
@@ -1082,47 +929,7 @@ function UserSignupPage({ onSuccess, onBack, t, authMethod = "email" }) {
     setLoading(true)
     setServerMessage("")
 
-    try {
-      const data = await apiRequest("/auth/otp/request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: form.email, purpose: "signup", provider: authMethod }),
-      })
-      if (data.success) {
-        setOtpStep(2)
-        setServerMessage(data.dev_code ? `Verification code sent. Demo code: ${data.dev_code}` : data.message)
-      } else {
-        setServerMessage(data.message || "Unable to send verification code.")
-      }
-    } catch (err) {
-      setServerMessage(err.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function handleSubmit(e) {
-    e.preventDefault()
-
-    if (!/^\d{6}$/.test(otpCode.trim())) {
-      setServerMessage("Enter the 6-digit verification code.")
-      return
-    }
-
-    setLoading(true)
-    setServerMessage("")
-
       try {
-        const verified = await apiRequest("/auth/otp/verify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: form.email, code: otpCode.trim(), purpose: "signup" }),
-        })
-        if (!verified.success) {
-          setServerMessage(verified.message || "Email verification failed.")
-          return
-        }
-
         const data = await apiRequest("/signup/user", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1138,7 +945,6 @@ function UserSignupPage({ onSuccess, onBack, t, authMethod = "email" }) {
             password: form.password,
             role: "user",
             auth_provider: authMethod,
-            email_verified: true,
           }
           saveProfile(profile)
           onSuccess(profile)
@@ -1159,26 +965,16 @@ function UserSignupPage({ onSuccess, onBack, t, authMethod = "email" }) {
       t={t}
     >
       <form className="form-stack" onSubmit={handleSubmit}>
-        <p className="auth-note">Creating with {authMethod === "google" ? "Google email" : "email"} requires a one-time email verification code.</p>
         <TextInput label={t.nameLabel} value={form.full_name} onChange={updateField("full_name")} error={errors.full_name} maxLength={60} pattern="[A-Za-z .'-]{3,}" />
-        <TextInput label={t.emailLabel} type="email" value={form.email} onChange={updateField("email")} error={errors.email} autoComplete="email" />
+        <TextInput label={authMethod === "google" ? "Google email" : t.emailLabel} type="email" value={form.email} onChange={updateField("email")} error={errors.email} autoComplete="email" />
         <TextInput label={t.phoneLabel} value={form.phone} onChange={updateField("phone")} error={errors.phone} placeholder="03001234567" inputMode="tel" maxLength={13} />
         <TextInput label={t.cityLabel} value={form.city} onChange={updateField("city")} error={errors.city} maxLength={40} />
         <TextInput label={t.passwordLabel} type="password" value={form.password} onChange={updateField("password")} error={errors.password} minLength={8} autoComplete="new-password" />
         <TextInput label={`Confirm ${t.passwordLabel}`} type="password" value={form.confirm} onChange={updateField("confirm")} error={errors.confirm} minLength={8} autoComplete="new-password" />
-        {otpStep === 2 && (
-          <TextInput label="Verification code" value={otpCode} onChange={(e) => setOtpCode(e.target.value)} inputMode="numeric" maxLength={6} placeholder="123456" />
-        )}
         {serverMessage && <p className="form-error">{serverMessage}</p>}
-        {otpStep === 1 ? (
-          <button className="primary-btn" type="button" disabled={loading} onClick={requestSignupOtp}>
-            {loading ? "Sending code..." : "Send OTP"}
-          </button>
-        ) : (
-          <button className="primary-btn" disabled={loading}>
-            {loading ? "Creating account..." : "Verify and create account"}
-          </button>
-        )}
+        <button className="primary-btn" disabled={loading}>
+          {loading ? "Creating account..." : "Create Account"}
+        </button>
       </form>
       <button className="link-btn" onClick={onBack}>Back</button>
     </AuthShell>
@@ -1205,8 +1001,6 @@ function LawyerSignupPage({ onSuccess, onBack, t, authMethod = "email" }) {
   const [errors, setErrors] = useState({})
   const [serverMessage, setServerMessage] = useState("")
   const [loading, setLoading] = useState(false)
-  const [otpStep, setOtpStep] = useState(1)
-  const [otpCode, setOtpCode] = useState("")
 
   function updateField(field) {
     return function (e) {
@@ -1214,7 +1008,7 @@ function LawyerSignupPage({ onSuccess, onBack, t, authMethod = "email" }) {
     }
   }
 
-  async function requestSignupOtp(e) {
+  async function handleSubmit(e) {
     e.preventDefault()
 
     const fieldErrors = getLawyerErrors(form)
@@ -1224,47 +1018,7 @@ function LawyerSignupPage({ onSuccess, onBack, t, authMethod = "email" }) {
     setLoading(true)
     setServerMessage("")
 
-    try {
-      const data = await apiRequest("/auth/otp/request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: form.email, purpose: "signup", provider: authMethod }),
-      })
-      if (data.success) {
-        setOtpStep(2)
-        setServerMessage(data.dev_code ? `Verification code sent. Demo code: ${data.dev_code}` : data.message)
-      } else {
-        setServerMessage(data.message || "Unable to send verification code.")
-      }
-    } catch (err) {
-      setServerMessage(err.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function handleSubmit(e) {
-    e.preventDefault()
-
-    if (!/^\d{6}$/.test(otpCode.trim())) {
-      setServerMessage("Enter the 6-digit verification code.")
-      return
-    }
-
-    setLoading(true)
-    setServerMessage("")
-
       try {
-        const verified = await apiRequest("/auth/otp/verify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: form.email, code: otpCode.trim(), purpose: "signup" }),
-        })
-        if (!verified.success) {
-          setServerMessage(verified.message || "Email verification failed.")
-          return
-        }
-
         const data = await apiRequest("/signup/lawyer", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1284,7 +1038,6 @@ function LawyerSignupPage({ onSuccess, onBack, t, authMethod = "email" }) {
             role: "lawyer",
             verification_status: "pending",
             auth_provider: authMethod,
-            email_verified: true,
           }
           saveProfile(profile)
           onSuccess(profile)
@@ -1305,9 +1058,8 @@ function LawyerSignupPage({ onSuccess, onBack, t, authMethod = "email" }) {
       t={t}
     >
       <form className="form-stack" onSubmit={handleSubmit}>
-        <p className="auth-note">Creating with {authMethod === "google" ? "Google email" : "email"} requires a one-time email verification code.</p>
         <TextInput label={t.nameLabel} value={form.lawyer_name} onChange={updateField("lawyer_name")} error={errors.lawyer_name} maxLength={60} pattern="[A-Za-z .'-]{3,}" />
-        <TextInput label={t.emailLabel} type="email" value={form.email} onChange={updateField("email")} error={errors.email} autoComplete="email" />
+        <TextInput label={authMethod === "google" ? "Google email" : t.emailLabel} type="email" value={form.email} onChange={updateField("email")} error={errors.email} autoComplete="email" />
         <TextInput label={t.phoneLabel} value={form.phone} onChange={updateField("phone")} error={errors.phone} placeholder="03001234567" inputMode="tel" maxLength={13} />
         <TextInput label={t.cityLabel} value={form.city} onChange={updateField("city")} error={errors.city} maxLength={40} />
         <TextInput label={t.dbaLabel} value={form.dba_number} onChange={updateField("dba_number")} error={errors.dba_number} placeholder="424 or 123-G/2018" maxLength={20} />
@@ -1315,19 +1067,10 @@ function LawyerSignupPage({ onSuccess, onBack, t, authMethod = "email" }) {
         <TextInput label={t.specializationLabel} value={form.specialization} onChange={updateField("specialization")} error={errors.specialization} placeholder="e.g. Family Law, Criminal Law" maxLength={50} />
         <TextInput label={t.passwordLabel} type="password" value={form.password} onChange={updateField("password")} error={errors.password} minLength={8} autoComplete="new-password" />
         <TextInput label={`Confirm ${t.passwordLabel}`} type="password" value={form.confirm} onChange={updateField("confirm")} error={errors.confirm} minLength={8} autoComplete="new-password" />
-        {otpStep === 2 && (
-          <TextInput label="Verification code" value={otpCode} onChange={(e) => setOtpCode(e.target.value)} inputMode="numeric" maxLength={6} placeholder="123456" />
-        )}
         {serverMessage && <p className="form-error">{serverMessage}</p>}
-        {otpStep === 1 ? (
-          <button className="primary-btn" type="button" disabled={loading} onClick={requestSignupOtp}>
-            {loading ? "Sending code..." : "Send OTP"}
-          </button>
-        ) : (
-          <button className="primary-btn" disabled={loading}>
-            {loading ? "Submitting..." : "Verify and register"}
-          </button>
-        )}
+        <button className="primary-btn" disabled={loading}>
+          {loading ? "Submitting..." : "Register as Lawyer"}
+        </button>
       </form>
       <button className="link-btn" onClick={onBack}>Back</button>
     </AuthShell>
@@ -1774,20 +1517,17 @@ function StatCard({ label, value }) {
 function AdminDashboard({ t }) {
   const [summary, setSummary] = useState(null)
   const [lawyers, setLawyers] = useState([])
-  const [users, setUsers] = useState([])
   const [activeTab, setActiveTab] = useState("pending")
   const [statusMessage, setStatusMessage] = useState("")
 
   async function loadData() {
     try {
-      const [summaryData, lawyersData, usersData] = await Promise.all([
+      const [summaryData, lawyersData] = await Promise.all([
         apiRequest("/admin/summary"),
         apiRequest("/admin/lawyers"),
-        apiRequest("/admin/users"),
       ])
       setSummary(summaryData)
       setLawyers(lawyersData.lawyers || [])
-      setUsers(usersData.users || [])
     } catch (err) {
       setStatusMessage(err.message)
     }
@@ -1846,12 +1586,6 @@ function AdminDashboard({ t }) {
           onClick={() => setActiveTab("approved")}
         >
           {t.approvedLawyers} ({approvedLawyers.length})
-        </button>
-        <button
-          className={activeTab === "users" ? "tab-btn active" : "tab-btn"}
-          onClick={() => setActiveTab("users")}
-        >
-          {t.registeredUsers} ({users.length})
         </button>
       </div>
 
@@ -1939,43 +1673,6 @@ function AdminDashboard({ t }) {
           </div>
         </div>
       )}
-
-      {activeTab === "users" && (
-        <div className="admin-table">
-          <div className="table-heading">
-            <h2>{t.usersHeader}</h2>
-            <p>{t.usersHelp}</p>
-          </div>
-          <div className="table-scroll">
-            {users.length === 0 ? (
-              <p className="empty-state">No registered users yet.</p>
-            ) : (
-              <table>
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Phone</th>
-                    <th>City</th>
-                    <th>Registered</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map(registeredUser => (
-                    <tr key={registeredUser.id || registeredUser.email}>
-                      <td>{registeredUser.name}</td>
-                      <td>{registeredUser.email}</td>
-                      <td>{registeredUser.phone || "-"}</td>
-                      <td>{registeredUser.city || "-"}</td>
-                      <td>{registeredUser.created_at || "-"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
-      )}
     </main>
   )
 }
@@ -1990,7 +1687,6 @@ export default function App() {
   const [showProfile, setShowProfile] = useState(false)
   const [showForgotPassword, setShowForgotPassword] = useState(false)
   const [forgotEmail, setForgotEmail] = useState("")
-  const [signupMethod, setSignupMethod] = useState("email")
   const t = getT(lang)
 
   useEffect(() => {
@@ -2057,9 +1753,9 @@ export default function App() {
       />
     </>
   )
-  if (screen === "chooseRole") return <ChooseRolePage t={t} onChoose={(role, method) => { setSignupMethod(method); setScreen(role === "user" ? "userSignup" : "lawyerSignup") }} onBack={() => setScreen("login")} />
-  if (screen === "userSignup") return <UserSignupPage t={t} authMethod={signupMethod} onSuccess={handleLogin} onBack={() => setScreen("chooseRole")} />
-  if (screen === "lawyerSignup") return <LawyerSignupPage t={t} authMethod={signupMethod} onSuccess={handleLogin} onBack={() => setScreen("chooseRole")} />
+  if (screen === "chooseRole") return <ChooseRolePage t={t} onChoose={role => setScreen(role === "user" ? "userSignup" : "lawyerSignup")} onBack={() => setScreen("login")} />
+  if (screen === "userSignup") return <UserSignupPage t={t} onSuccess={handleLogin} onBack={() => setScreen("chooseRole")} />
+  if (screen === "lawyerSignup") return <LawyerSignupPage t={t} onSuccess={handleLogin} onBack={() => setScreen("chooseRole")} />
 
   // Main app after login
   return (
