@@ -89,6 +89,11 @@ input, select, textarea {
   outline: none;
 }
 
+select option {
+  background: var(--surface-soft);
+  color: var(--text);
+}
+
 input:focus, select:focus, textarea:focus {
   border-color: var(--blue);
   box-shadow: 0 0 0 3px rgba(36, 95, 143, 0.1);
@@ -96,12 +101,12 @@ input:focus, select:focus, textarea:focus {
 
 /* ── Auth layout ── */
 .auth-shell {
-  min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
-  grid-template-columns: 1fr minmax(320px, 430px);
-  gap: 48px;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 390px);
+  gap: clamp(24px, 5vw, 64px);
   align-items: center;
-  padding: 48px clamp(20px, 6vw, 92px);
+  padding: clamp(24px, 5vw, 64px) clamp(20px, 6vw, 92px);
   background:
     linear-gradient(135deg, rgba(255,255,255,0.28), rgba(255,255,255,0.05) 35%, transparent 70%);
 }
@@ -167,9 +172,11 @@ input:focus, select:focus, textarea:focus {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 36px 32px;
+  padding: 28px;
   box-shadow: var(--shadow);
   backdrop-filter: blur(16px);
+  max-height: calc(100dvh - 48px);
+  overflow: auto;
 }
 
 .auth-card h2 {
@@ -181,6 +188,38 @@ input:focus, select:focus, textarea:focus {
   color: var(--muted);
   font-size: 14px;
   margin-bottom: 24px;
+}
+
+.auth-methods {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 4px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+.method-btn {
+  min-height: 38px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.method-btn.active {
+  background: var(--surface);
+  color: var(--navy);
+  box-shadow: 0 2px 7px rgba(23, 50, 77, 0.10);
+}
+
+[data-theme="dark"] .method-btn.active {
+  background: rgba(255, 255, 255, 0.10);
+  color: var(--text);
 }
 
 /* ── Form elements ── */
@@ -717,6 +756,28 @@ input:focus, select:focus, textarea:focus {
   border-bottom-color: rgba(255, 255, 255, 0.06);
 }
 
+[data-theme="dark"] .quick-prompts {
+  background: rgba(18, 24, 28, 0.96);
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .prompt-chip {
+  background: rgba(30, 37, 40, 0.96);
+  color: var(--text);
+}
+
+[data-theme="dark"] .form-error {
+  background: rgba(92, 37, 37, 0.48);
+  border-color: rgba(242, 158, 158, 0.48);
+  color: var(--danger);
+}
+
+[data-theme="dark"] .alert.info {
+  background: rgba(42, 82, 112, 0.36);
+  border-color: rgba(132, 170, 200, 0.38);
+  color: var(--text);
+}
+
 .chat-avatar {
   width: 42px;
   height: 42px;
@@ -796,14 +857,16 @@ input:focus, select:focus, textarea:focus {
   margin-left: auto;
   padding: 8px 12px;
   border-radius: 8px;
-  background: rgba(255,255,255,0.1);
-  color: #fff;
+  background: var(--surface-soft);
+  color: var(--navy);
+  border: 1px solid var(--border);
   font-weight: 700;
   font-size: 12px;
 }
 
 .ghost-btn:hover {
-  background: rgba(255,255,255,0.18);
+  border-color: var(--blue);
+  color: var(--blue);
 }
 
 .chat-messages {
@@ -1261,8 +1324,77 @@ tr:last-child td {
 /* ── Responsive ── */
 @media (max-width: 768px) {
   .auth-shell {
-    grid-template-columns: 1fr;
-    padding: 24px 16px 32px;
+    position: fixed;
+    inset: 0;
+    min-height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    overflow: hidden;
+    padding: 18px 14px max(18px, env(safe-area-inset-bottom));
+    gap: 12px;
+  }
+
+  .brand-panel {
+    width: min(100%, 420px);
+    margin-right: auto;
+    margin-bottom: auto;
+    padding-top: 6px;
+  }
+
+  .brand-panel h1 {
+    max-width: 240px;
+    font-size: clamp(32px, 10vw, 44px);
+    margin-bottom: 0;
+  }
+
+  .brand-panel > p:not(.eyebrow),
+  .brand-pills {
+    display: none;
+  }
+
+  .brand-mark {
+    width: 92px;
+    margin-bottom: 8px;
+  }
+
+  .eyebrow {
+    margin-bottom: 4px;
+  }
+
+  .auth-card {
+    width: min(100%, 420px);
+    max-height: min(70dvh, 660px);
+    align-self: center;
+    padding: 18px;
+    border-radius: 10px;
+    overflow: auto;
+  }
+
+  .auth-card h2 {
+    font-size: 21px;
+    margin-bottom: 3px;
+  }
+
+  .auth-subtitle {
+    margin-bottom: 12px;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .auth-methods {
+    margin-bottom: 12px;
+  }
+
+  .form-stack {
+    gap: 10px;
+  }
+
+  .form-stack input,
+  .form-stack select,
+  .form-stack textarea {
+    min-height: 42px;
+    padding: 9px 11px;
   }
 
   .navbar {
@@ -1303,8 +1435,17 @@ tr:last-child td {
   }
 
   .quick-prompts {
-    grid-template-columns: 1fr;
-    padding: 12px 14px 14px;
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+    padding: 10px 12px 12px;
+    scroll-snap-type: x proximity;
+  }
+
+  .prompt-chip {
+    flex: 0 0 min(78vw, 260px);
+    min-height: 42px;
+    scroll-snap-align: start;
   }
 
   .chat-window,
@@ -1316,17 +1457,50 @@ tr:last-child td {
   }
 
   .chat-input-bar {
-    flex-wrap: wrap;
-    padding: 12px;
+    flex-wrap: nowrap;
+    padding: 10px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
   }
 
   .chat-input {
-    width: 100%;
-    flex-basis: 100%;
+    width: auto;
+    min-width: 0;
+    flex-basis: auto;
+    padding: 10px 13px;
   }
 
   .send-btn {
-    width: 100%;
+    width: auto;
+    min-width: 68px;
+    padding: 10px 14px;
+  }
+
+  .chat-page {
+    min-height: calc(100dvh - 132px);
+    padding: 8px 8px 16px;
+  }
+
+  .chat-window {
+    height: calc(100dvh - 164px);
+    min-height: 460px;
+    border-radius: 10px;
+  }
+
+  .chat-header {
+    padding: 10px 12px;
+  }
+
+  .chat-messages {
+    min-height: 0;
+    max-height: none;
+    padding: 14px 12px;
+  }
+
+  .bubble {
+    max-width: 88%;
+    padding: 9px 11px;
+    font-size: 14px;
+    line-height: 1.55;
   }
 
   .role-grid {

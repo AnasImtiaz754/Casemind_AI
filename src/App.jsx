@@ -1294,7 +1294,10 @@ function ChatPage({ user, t }) {
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ question, history }),
 })
-      const cleanAnswer = formatReply(cleanResponse(botReply.answer))
+      const answer = typeof botReply?.answer === "string" && botReply.answer.trim()
+        ? botReply.answer
+        : fallback_answer(question)
+      const cleanAnswer = formatReply(cleanResponse(answer))
       setMessages([...chatSoFar, { role: "bot", text: cleanAnswer }])
     } catch (err) {
       setMessages([...chatSoFar, { role: "bot", text: err.message }])
@@ -1517,17 +1520,20 @@ function StatCard({ label, value }) {
 function AdminDashboard({ t }) {
   const [summary, setSummary] = useState(null)
   const [lawyers, setLawyers] = useState([])
+  const [users, setUsers] = useState([])
   const [activeTab, setActiveTab] = useState("pending")
   const [statusMessage, setStatusMessage] = useState("")
 
   async function loadData() {
     try {
-      const [summaryData, lawyersData] = await Promise.all([
+      const [summaryData, lawyersData, usersData] = await Promise.all([
         apiRequest("/admin/summary"),
         apiRequest("/admin/lawyers"),
+        apiRequest("/admin/users"),
       ])
       setSummary(summaryData)
       setLawyers(lawyersData.lawyers || [])
+      setUsers(usersData.users || [])
     } catch (err) {
       setStatusMessage(err.message)
     }
@@ -1586,6 +1592,12 @@ function AdminDashboard({ t }) {
           onClick={() => setActiveTab("approved")}
         >
           {t.approvedLawyers} ({approvedLawyers.length})
+        </button>
+        <button
+          className={activeTab === "users" ? "tab-btn active" : "tab-btn"}
+          onClick={() => setActiveTab("users")}
+        >
+          {t.registeredUsers} ({users.length})
         </button>
       </div>
 
@@ -1673,6 +1685,43 @@ function AdminDashboard({ t }) {
           </div>
         </div>
       )}
+
+      {activeTab === "users" && (
+        <div className="admin-table">
+          <div className="table-heading">
+            <h2>{t.usersHeader}</h2>
+            <p>{t.usersHelp}</p>
+          </div>
+          <div className="table-scroll">
+            {users.length === 0 ? (
+              <p className="empty-state">No registered users yet.</p>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Phone</th>
+                    <th>City</th>
+                    <th>Registered</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((registeredUser) => (
+                    <tr key={registeredUser.id || registeredUser.email}>
+                      <td>{registeredUser.name || "-"}</td>
+                      <td>{registeredUser.email || "-"}</td>
+                      <td>{registeredUser.phone || "-"}</td>
+                      <td>{registeredUser.city || "-"}</td>
+                      <td>{registeredUser.created_at || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
     </main>
   )
 }
@@ -1687,6 +1736,7 @@ export default function App() {
   const [showProfile, setShowProfile] = useState(false)
   const [showForgotPassword, setShowForgotPassword] = useState(false)
   const [forgotEmail, setForgotEmail] = useState("")
+  const [signupMethod, setSignupMethod] = useState("email")
   const t = getT(lang)
 
   useEffect(() => {
@@ -1753,9 +1803,12 @@ export default function App() {
       />
     </>
   )
-  if (screen === "chooseRole") return <ChooseRolePage t={t} onChoose={role => setScreen(role === "user" ? "userSignup" : "lawyerSignup")} onBack={() => setScreen("login")} />
-  if (screen === "userSignup") return <UserSignupPage t={t} onSuccess={handleLogin} onBack={() => setScreen("chooseRole")} />
-  if (screen === "lawyerSignup") return <LawyerSignupPage t={t} onSuccess={handleLogin} onBack={() => setScreen("chooseRole")} />
+  if (screen === "chooseRole") return <ChooseRolePage t={t} onChoose={(role, method) => {
+    setSignupMethod(method)
+    setScreen(role === "user" ? "userSignup" : "lawyerSignup")
+  }} onBack={() => setScreen("login")} />
+  if (screen === "userSignup") return <UserSignupPage t={t} authMethod={signupMethod} onSuccess={handleLogin} onBack={() => setScreen("chooseRole")} />
+  if (screen === "lawyerSignup") return <LawyerSignupPage t={t} authMethod={signupMethod} onSuccess={handleLogin} onBack={() => setScreen("chooseRole")} />
 
   // Main app after login
   return (
