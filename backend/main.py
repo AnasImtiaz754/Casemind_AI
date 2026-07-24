@@ -42,18 +42,21 @@ def load_local_env():
 load_local_env()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 ADMIN_EMAIL = os.getenv("CASEMIND_ADMIN_EMAIL", "admin@casemind.ai")
 ADMIN_PASSWORD = os.getenv("CASEMIND_ADMIN_PASSWORD", "admin123")
 
-SYSTEM_PROMPT = """You are CaseMind AI, a legal assistant specialized in Pakistani law.
-Answer in a calm, practical tone.
-Use short sections when useful:
-1) Direct answer
-2) Steps to take
-3) Documents or proof to keep
-4) Caution or next best move
-Prefer bullet points over long paragraphs.
-Keep the answer readable on a phone screen.
+SYSTEM_PROMPT = """You are CaseMind AI, a polished legal assistant specialized in Pakistani law.
+Answer in the same language as the user.
+Use a calm, practical tone and make replies mobile-friendly.
+Always structure substantive answers with these sections when relevant:
+Direct answer
+Pakistani legal context
+What to do now
+Documents or proof to keep
+When to speak with a lawyer
+Do not invent statutes, case law, or citations.
+If something is uncertain, say so plainly.
 Always remind users to consult a real lawyer for formal advice."""
 
 
@@ -618,7 +621,7 @@ async def ask_question(body: Question):
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model": "llama-3.1-8b-instant",
+                    "model": GROQ_MODEL,
                     "messages": messages,
                     "temperature": 0.3,
                     "max_tokens": 700,

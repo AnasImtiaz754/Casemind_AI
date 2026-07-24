@@ -54,6 +54,9 @@ const STRINGS = {
     findLawyer: "Find an Approved Lawyer",
     verifiedDirectory: "Verified Directory",
     selectLanguage: "Language",
+    quickPromptProperty: "What should I do if my property was taken without permission?",
+    quickPromptDba: "How do I verify a lawyer's DBA number?",
+    quickPromptFamily: "What documents do I need for a family dispute?",
   },
   ur: {
     appName: "کیس مائنڈ اے آئی",
@@ -87,6 +90,9 @@ const STRINGS = {
     findLawyer: "منظور شدہ وکیل تلاش کریں",
     verifiedDirectory: "تصدیق شدہ ڈائریکٹری",
     selectLanguage: "زبان",
+    quickPromptProperty: "اگر میری پراپرٹی بغیر اجازت لے لی گئی ہو تو میں کیا کروں؟",
+    quickPromptDba: "وکیل کا DBA نمبر کیسے چیک کروں؟",
+    quickPromptFamily: "خاندانی تنازع کے لیے کون سے کاغذات چاہییں؟",
   },
 }
 
@@ -280,6 +286,9 @@ async function apiRequest(path, options = {}) {
     if (res.ok && !(data && data.success === false && /backend/i.test(data.message || ""))) {
       return data
     }
+    if (path === "/ask" && typeof data?.answer === "string" && data.answer.trim()) {
+      return data
+    }
     return fallbackApiRequest(path, options, data)
   } catch (err) {
     if (err.name === "AbortError") {
@@ -335,7 +344,12 @@ async function fallbackApiRequest(path, options = {}, upstreamData = null) {
   const state = getMockBackend()
 
   if (path === "/ask" && method === "POST") {
-    return { answer: fallback_answer(body.question) }
+    return {
+      answer: upstreamData?.answer && typeof upstreamData.answer === "string" ? upstreamData.answer : fallback_answer(body.question),
+      success: upstreamData?.success ?? false,
+      mode: upstreamData?.mode || "fallback",
+      message: upstreamData?.message,
+    }
   }
 
   if (path === "/login" && method === "POST") {
@@ -534,34 +548,62 @@ async function fallbackApiRequest(path, options = {}, upstreamData = null) {
 function fallback_answer(question = "") {
   const text = String(question || "").toLowerCase()
 
+  const build = (direct, context, steps, docs, lawyer) => [
+    `Direct answer: ${direct}`,
+    `Pakistani legal context: ${context}`,
+    `What to do now: ${steps.join(" ")}`,
+    `Documents or proof to keep: ${docs.join(" ")}`,
+    `When to speak with a lawyer: ${lawyer}`,
+  ].join("\n\n")
+
   if (["theft", "steal", "stolen", "robbery"].some((word) => text.includes(word))) {
-    return [
-      "This sounds like a possible theft or property offence under Pakistani law.",
-      "Write down the full timeline, keep proof such as receipts, messages, CCTV, witnesses, and report the matter to the police as soon as possible.",
-      "If the issue is urgent or high-value, speak to a licensed lawyer before taking formal action.",
-    ].join("\n\n")
+    return build(
+      "This sounds like a possible theft or property offence.",
+      "The exact legal section depends on whether the facts point to theft, robbery, or another related offence.",
+      [
+        "Write down the full timeline.",
+        "Preserve receipts, screenshots, CCTV, and witness names.",
+        "Report the incident to the police as soon as possible.",
+      ],
+      ["Proof of ownership or possession.", "Messages, call logs, CCTV, and witness details."],
+      "Use a licensed lawyer if the matter is urgent, repeated, or high value.",
+    )
   }
 
   if (["divorce", "khula", "talaq", "custody", "maintenance"].some((word) => text.includes(word))) {
-    return [
-      "Family-law matters in Pakistan depend on the exact issue, such as talaq, khula, child custody, or maintenance.",
-      "Keep your marriage documents, notices, identity documents, and financial records together.",
-      "A family lawyer can guide you on the correct court process and documents for your situation.",
-    ].join("\n\n")
+    return build(
+      "This is a family-law issue that depends on the exact facts.",
+      "Talaq, khula, custody, and maintenance can follow different procedures in Pakistan.",
+      [
+        "Keep marriage and identity documents ready.",
+        "Save notices, messages, and financial records.",
+        "Confirm the correct forum before filing anything.",
+      ],
+      ["Nikah nama, IDs, notices, and financial records.", "Any court papers or prior agreements."],
+      "A family lawyer can tell you the right process and filing path.",
+    )
   }
 
   if (["property", "land", "rent", "tenant", "lease"].some((word) => text.includes(word))) {
-    return [
-      "Property and tenancy disputes usually depend on ownership documents, possession history, payment proof, and the written agreement.",
-      "Keep sale deeds, registry documents, rent agreements, receipts, and messages in one place.",
-      "For notices, possession issues, or active litigation, consult a licensed lawyer.",
-    ].join("\n\n")
+    return build(
+      "This is likely a property or tenancy dispute.",
+      "These matters usually turn on ownership records, possession history, and the written agreement.",
+      [
+        "Collect title papers, registry documents, and the agreement.",
+        "Keep payment receipts and messages together.",
+        "Avoid making oral promises when a dispute is already active.",
+      ],
+      ["Sale deed, registry, rent agreement, receipts, and correspondence."],
+      "Speak with a lawyer if notice, possession, or litigation is involved.",
+    )
   }
 
   return [
-    "I cannot reach the AI service right now, so here is a general legal guidance fallback.",
-    "Share the key facts, collect documents, avoid acting only on informal advice, and check deadlines carefully.",
-    "For anything formal, urgent, or risky, consult a licensed lawyer in Pakistan.",
+    "Direct answer: I cannot reach the AI service right now, so this is a structured legal fallback.",
+    "Pakistani legal context: I will keep the reply general unless you share the exact facts.",
+    "What to do now: Share the issue, the date, the place, the parties involved, and any deadlines.",
+    "Documents or proof to keep: Messages, notices, receipts, IDs, and any court papers.",
+    "When to speak with a lawyer: Always do so for urgent, sensitive, or high-stakes matters.",
   ].join("\n\n")
 }
 
@@ -1253,10 +1295,10 @@ function ChatPage({ user, t }) {
   const [isLoading, setIsLoading] = useState(false)
   const bottomRef = useRef(null)
   const quickPrompts = useMemo(() => [
-    "What should I do if my property was taken without permission?",
-    "How do I verify a lawyer's DBA number?",
-    "What documents do I need for a family dispute?",
-  ], [])
+    t.quickPromptProperty,
+    t.quickPromptDba,
+    t.quickPromptFamily,
+  ], [t])
 
   // Scroll to the latest message automatically
   useEffect(() => {
@@ -1747,6 +1789,11 @@ export default function App() {
     localStorage.setItem(LANG_STORAGE_KEY, lang)
   }, [lang])
 
+  useEffect(() => {
+    document.documentElement.lang = lang === "ur" ? "ur" : "en"
+    document.documentElement.dir = lang === "ur" ? "rtl" : "ltr"
+  }, [lang])
+
   function handleLogin(data) {
     saveProfile(data)
     setUser(data)
@@ -1781,7 +1828,7 @@ export default function App() {
 
   // Auth screens
   if (screen === "login") return (
-    <>
+    <div dir={lang === "ur" ? "rtl" : "ltr"} lang={lang === "ur" ? "ur" : "en"}>
       <LoginPage
         t={t}
         onLogin={handleLogin}
@@ -1801,14 +1848,14 @@ export default function App() {
           if (existing) saveProfile({ ...existing, password })
         }}
       />
-    </>
+    </div>
   )
-  if (screen === "chooseRole") return <ChooseRolePage t={t} onChoose={(role, method) => {
+  if (screen === "chooseRole") return <div dir={lang === "ur" ? "rtl" : "ltr"} lang={lang === "ur" ? "ur" : "en"}><ChooseRolePage t={t} onChoose={(role, method) => {
     setSignupMethod(method)
     setScreen(role === "user" ? "userSignup" : "lawyerSignup")
-  }} onBack={() => setScreen("login")} />
-  if (screen === "userSignup") return <UserSignupPage t={t} authMethod={signupMethod} onSuccess={handleLogin} onBack={() => setScreen("chooseRole")} />
-  if (screen === "lawyerSignup") return <LawyerSignupPage t={t} authMethod={signupMethod} onSuccess={handleLogin} onBack={() => setScreen("chooseRole")} />
+  }} onBack={() => setScreen("login")} /></div>
+  if (screen === "userSignup") return <div dir={lang === "ur" ? "rtl" : "ltr"} lang={lang === "ur" ? "ur" : "en"}><UserSignupPage t={t} authMethod={signupMethod} onSuccess={handleLogin} onBack={() => setScreen("chooseRole")} /></div>
+  if (screen === "lawyerSignup") return <div dir={lang === "ur" ? "rtl" : "ltr"} lang={lang === "ur" ? "ur" : "en"}><LawyerSignupPage t={t} authMethod={signupMethod} onSuccess={handleLogin} onBack={() => setScreen("chooseRole")} /></div>
 
   // Main app after login
   return (
