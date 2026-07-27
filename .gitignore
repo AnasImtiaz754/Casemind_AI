@@ -8,11 +8,24 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+node_modules*
 dist
+dist*
 dist-ssr
 *.local
+
+# Any env file, anywhere, any extension after ".env"
 .env
+.env.*
 backend/.env
+backend/.env.*
+
+# Python
+__pycache__
+*.pyc
+
+# Local database (regenerated on first run, shouldn't be shared)
+backend/casemind.db
 
 # Editor directories and files
 .vscode/*
