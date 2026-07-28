@@ -78,9 +78,21 @@ def init_db():
             phone TEXT,
             city TEXT,
             password TEXT NOT NULL,
+            auth_provider TEXT DEFAULT 'email',
+            login_count INTEGER DEFAULT 0,
+            last_login TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    cursor.execute("PRAGMA table_info(users)")
+    user_columns = [row["name"] for row in cursor.fetchall()]
+    if "auth_provider" not in user_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN auth_provider TEXT DEFAULT 'email'")
+    if "login_count" not in user_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN login_count INTEGER DEFAULT 0")
+    if "last_login" not in user_columns:
+        cursor.execute("ALTER TABLE users ADD COLUMN last_login TIMESTAMP")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS lawyers (
@@ -243,6 +255,11 @@ class LoginData(BaseModel):
     password: str
 
 
+class GoogleAuthData(BaseModel):
+    email: str
+    full_name: str | None = None
+
+
 class ForgotPasswordRequest(BaseModel):
     email: str
 
@@ -380,11 +397,21 @@ def login(data: LoginData):
     cursor = conn.cursor()
 
     cursor.execute(
-        "SELECT id, full_name, email, phone, city FROM users WHERE email=? AND password=?",
+        "SELECT id, full_name, email, phone, city, auth_provider, login_count, last_login FROM users WHERE email=? AND password=?",
         (data.email.strip().lower(), hash_password(data.password)),
     )
     user = cursor.fetchone()
     if user:
+        cursor.execute(
+            "UPDATE users SET login_count=COALESCE(login_count, 0) + 1, last_login=CURRENT_TIMESTAMP WHERE id=?",
+            (user["id"],),
+        )
+        conn.commit()
+        cursor.execute(
+            "SELECT id, full_name, email, phone, city, auth_provider, login_count, last_login FROM users WHERE id=?",
+            (user["id"],),
+        )
+        user = cursor.fetchone()
         conn.close()
         return {
             "success": True,
@@ -393,6 +420,9 @@ def login(data: LoginData):
             "email": user["email"],
             "phone": user["phone"],
             "city": user["city"],
+            "auth_provider": user["auth_provider"],
+            "login_count": user["login_count"],
+            "last_login": user["last_login"],
         }
 
     cursor.execute(
@@ -421,6 +451,64 @@ def login(data: LoginData):
 
     conn.close()
     return {"success": False, "message": "Invalid email or password."}
+
+
+@app.post("/auth/google")
+def google_auth(data: GoogleAuthData):
+    email = data.email.strip().lower()
+    if not valid_email(email):
+        return validation_error("Enter a valid email address.")
+
+    display_name = (data.full_name or email.split("@")[0]).strip()
+    if len(display_name) < 3:
+        display_name = "CaseMind User"
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT id, full_name, email, phone, city, auth_provider, login_count, last_login FROM users WHERE email=?",
+        (email,),
+    )
+    user = cursor.fetchone()
+
+    if not user:
+        cursor.execute("SELECT 1 FROM lawyers WHERE email=?", (email,))
+        if cursor.fetchone():
+            conn.close()
+            return validation_error("This email is registered as a lawyer. Please use lawyer login.")
+        cursor.execute(
+            """
+            INSERT INTO users (full_name, email, phone, city, password, auth_provider, login_count, last_login)
+            VALUES (?, ?, '', '', ?, 'google', 1, CURRENT_TIMESTAMP)
+            """,
+            (display_name, email, hash_password(secrets.token_urlsafe(32))),
+        )
+        conn.commit()
+    else:
+        cursor.execute(
+            "UPDATE users SET login_count=COALESCE(login_count, 0) + 1, last_login=CURRENT_TIMESTAMP, auth_provider='google' WHERE id=?",
+            (user["id"],),
+        )
+        conn.commit()
+
+    cursor.execute(
+        "SELECT id, full_name, email, phone, city, auth_provider, login_count, last_login FROM users WHERE email=?",
+        (email,),
+    )
+    user = cursor.fetchone()
+    conn.close()
+
+    return {
+        "success": True,
+        "role": "user",
+        "name": user["full_name"],
+        "email": user["email"],
+        "phone": user["phone"],
+        "city": user["city"],
+        "auth_provider": user["auth_provider"],
+        "login_count": user["login_count"],
+        "last_login": user["last_login"],
+    }
 
 
 @app.post("/forgot-password/request")
@@ -515,6 +603,9 @@ def user_dict(row):
         "email": row["email"],
         "phone": row["phone"],
         "city": row["city"],
+        "auth_provider": row["auth_provider"] if "auth_provider" in row.keys() else "email",
+        "login_count": row["login_count"] if "login_count" in row.keys() else 0,
+        "last_login": row["last_login"] if "last_login" in row.keys() else None,
         "created_at": row["created_at"],
     }
 
@@ -574,13 +665,27 @@ def admin_users():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT id, full_name, email, phone, city, created_at
+        SELECT id, full_name, email, phone, city, auth_provider, login_count, last_login, created_at
         FROM users
         ORDER BY created_at DESC
     """)
     rows = cursor.fetchall()
     conn.close()
     return {"users": [user_dict(row) for row in rows]}
+
+
+@app.delete("/admin/users/{user_id}")
+def delete_user(user_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM users WHERE id=?", (user_id,))
+    conn.commit()
+    changed = cursor.rowcount
+    conn.close()
+
+    if not changed:
+        return validation_error("User not found.")
+    return {"success": True, "message": "User deleted."}
 
 
 @app.patch("/admin/lawyers/{lawyer_id}/status")

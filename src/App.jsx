@@ -20,6 +20,8 @@ const API_URL = import.meta.env.VITE_API_BASE_URL?.trim() || "/api"
 const PROFILE_STORAGE_PREFIX = "casemind_profile:"
 const LANG_STORAGE_KEY = "casemind_language"
 const THEME_STORAGE_KEY = "casemind_theme"
+const AUTH_SESSION_KEY = "casemind_active_user"
+const CHAT_ARCHIVE_PREFIX = "casemind_chat_archive:"
 
 const STRINGS = {
   en: {
@@ -386,6 +388,44 @@ async function fallbackApiRequest(path, options = {}, upstreamData = null) {
       : { success: false, message: "Invalid email or password." }
   }
 
+  if (path === "/auth/google" && method === "POST") {
+    const email = (body.email || "").trim().toLowerCase()
+    if (!isValidEmail(email)) return { success: false, message: "Enter a valid email address." }
+
+    let user = state.users.find((entry) => entry.email === email)
+    if (!user) {
+      const lawyerExists = state.lawyers.some((entry) => entry.email === email)
+      if (lawyerExists) return { success: false, message: "This email is registered as a lawyer. Please use lawyer login." }
+      user = {
+        id: Date.now(),
+        full_name: email.split("@")[0],
+        email,
+        phone: "",
+        city: "",
+        password: "",
+        auth_provider: "google",
+        login_count: 0,
+        created_at: new Date().toISOString(),
+      }
+      state.users.push(user)
+    }
+    user.auth_provider = "google"
+    user.login_count = Number(user.login_count || 0) + 1
+    user.last_login = new Date().toISOString()
+    saveMockBackend(state)
+    return {
+      success: true,
+      role: "user",
+      name: user.full_name,
+      email: user.email,
+      phone: user.phone,
+      city: user.city,
+      auth_provider: user.auth_provider,
+      login_count: user.login_count,
+      last_login: user.last_login,
+    }
+  }
+
   if (path === "/signup/user" && method === "POST") {
     const email = (body.email || "").trim().toLowerCase()
     const exists = state.users.some((entry) => entry.email === email) || state.lawyers.some((entry) => entry.email === email)
@@ -522,9 +562,22 @@ async function fallbackApiRequest(path, options = {}, upstreamData = null) {
         email: entry.email,
         phone: entry.phone,
         city: entry.city,
+        auth_provider: entry.auth_provider || "email",
+        login_count: entry.login_count || 0,
+        last_login: entry.last_login || "",
         created_at: entry.created_at || "",
       })),
     }
+  }
+
+  if (/^\/admin\/users\/\d+$/.test(path) && method === "DELETE") {
+    const userId = Number(path.split("/")[3])
+    const before = state.users.length
+    state.users = state.users.filter((entry, index) => (entry.id || index + 1) !== userId)
+    saveMockBackend(state)
+    return state.users.length !== before
+      ? { success: true, message: "User deleted." }
+      : { success: false, message: "User not found." }
   }
 
   if (/^\/admin\/lawyers\/\d+\/status$/.test(path) && method === "PATCH") {
@@ -543,6 +596,32 @@ async function fallbackApiRequest(path, options = {}, upstreamData = null) {
   }
 
   return upstreamData || { success: false, message: "The backend is unavailable right now." }
+}
+
+function saveSession(profile) {
+  if (!profile?.email) return
+  try {
+    localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(profile))
+  } catch {
+    // Ignore storage failures.
+  }
+}
+
+function loadSession() {
+  try {
+    const saved = localStorage.getItem(AUTH_SESSION_KEY)
+    return saved ? JSON.parse(saved) : null
+  } catch {
+    return null
+  }
+}
+
+function clearSession() {
+  try {
+    localStorage.removeItem(AUTH_SESSION_KEY)
+  } catch {
+    // Ignore storage failures.
+  }
 }
 
 function fallback_answer(question = "") {
@@ -711,9 +790,8 @@ function AuthShell({ title, subtitle, children, t }) {
 }
 
 // ─── LOGIN PAGE ───────────────────────────────────────────────
-function LoginPage({ onLogin, onCreateAccount, onForgotPassword, t }) {
-  const [form, setForm] = useState({ email: "", password: "" })
-  const [authMethod, setAuthMethod] = useState("google")
+function LoginPage({ onLogin, onCreateAccount, t }) {
+  const [form, setForm] = useState({ email: "" })
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
@@ -730,26 +808,22 @@ function LoginPage({ onLogin, onCreateAccount, onForgotPassword, t }) {
       setError("Please enter a valid email address.")
       return
     }
-    if (!form.password) {
-      setError("Please enter your password.")
-      return
-    }
 
     setLoading(true)
     setError("")
 
     try {
-      const data = await apiRequest("/login", {
+      const data = await apiRequest("/auth/google", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, auth_provider: authMethod }),
+        body: JSON.stringify({ email: form.email }),
       })
 
       if (data.success) {
-        const profile = loadProfile(form.email) || { email: form.email, name: data.name, role: data.role, auth_provider: authMethod }
-        onLogin(mergeProfile(profile, { ...data, auth_provider: authMethod }))
+        const profile = loadProfile(form.email) || { email: form.email, name: data.name, role: data.role, auth_provider: "google" }
+        onLogin(mergeProfile(profile, { ...data, auth_provider: "google" }))
       } else {
-        setError(data.message || "Invalid email or password.")
+        setError(data.message || "Unable to continue with Google.")
       }
     } catch (err) {
       setError(err.message)
@@ -760,41 +834,24 @@ function LoginPage({ onLogin, onCreateAccount, onForgotPassword, t }) {
 
   return (
     <AuthShell title={t.loginTitle} subtitle={t.loginSubtitle} t={t}>
-      <div className="auth-methods" aria-label="Sign in method">
-        <button type="button" className={authMethod === "google" ? "method-btn active" : "method-btn"} onClick={() => setAuthMethod("google")}>
-          Google
-        </button>
-        <button type="button" className={authMethod === "email" ? "method-btn active" : "method-btn"} onClick={() => setAuthMethod("email")}>
-          Email
-        </button>
-      </div>
       <form onSubmit={handleLogin} className="form-stack">
         <TextInput
-          label={authMethod === "google" ? "Google email" : t.emailLabel}
+          label="Google email"
           type="email"
           value={form.email}
           onChange={updateField("email")}
-          placeholder={authMethod === "google" ? "you@gmail.com" : "you@example.com"}
-        />
-        <TextInput
-          label={t.passwordLabel}
-          type="password"
-          value={form.password}
-          onChange={updateField("password")}
-          placeholder="Enter your password"
+          placeholder="you@gmail.com"
+          autoComplete="email"
         />
         {error && <p className="form-error">{error}</p>}
         <button className="primary-btn" type="submit" disabled={loading}>
-          {loading ? `${t.signIn}...` : t.signIn}
+          {loading ? "Checking..." : "Continue with Google"}
         </button>
       </form>
       <div className="auth-footer">
         <div className="auth-footer-actions">
           <button className="secondary-btn auth-action-btn" type="button" onClick={onCreateAccount}>
-            {t.createAccount}
-          </button>
-          <button className="link-btn forgot-link" type="button" onClick={() => onForgotPassword(form.email)}>
-            Forgot password?
+            Register as lawyer
           </button>
         </div>
       </div>
@@ -1274,23 +1331,26 @@ function ProfileCard({ user, t, onSaveProfile }) {
 
 // ─── CHAT PAGE ────────────────────────────────────────────────
 function ChatPage({ user, t }) {
-  const storageKey = user?.email ? `casemind_chat_history:${user.email}` : "casemind_chat_history:guest"
+  const archiveKey = user?.email ? `${CHAT_ARCHIVE_PREFIX}${user.email}` : `${CHAT_ARCHIVE_PREFIX}guest`
   const initialMessages = [
     {
       role: "bot",
       text: t.welcomeBot,
     },
   ]
-  const [messages, setMessages] = useState(() => {
+  const [messages, setMessages] = useState(initialMessages)
+  const [archivedChats, setArchivedChats] = useState(() => {
     try {
-      const saved = localStorage.getItem(storageKey)
-      if (!saved) return initialMessages
+      const saved = localStorage.getItem(archiveKey)
+      if (!saved) return []
       const parsed = JSON.parse(saved)
-      return Array.isArray(parsed) && parsed.length > 0 ? parsed : initialMessages
+      return Array.isArray(parsed) ? parsed : []
     } catch {
-      return initialMessages
+      return []
     }
   })
+  const [showHistory, setShowHistory] = useState(false)
+  const [currentChatId, setCurrentChatId] = useState(null)
   const [inputText, setInputText] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const bottomRef = useRef(null)
@@ -1306,12 +1366,41 @@ function ChatPage({ user, t }) {
   }, [messages])
 
   useEffect(() => {
+    setMessages(initialMessages)
     try {
-      localStorage.setItem(storageKey, JSON.stringify(messages))
+      const saved = localStorage.getItem(archiveKey)
+      const parsed = saved ? JSON.parse(saved) : []
+      setArchivedChats(Array.isArray(parsed) ? parsed : [])
     } catch {
-      // If storage is unavailable, the chat still works for this session.
+      setArchivedChats([])
     }
-  }, [messages, storageKey])
+  }, [archiveKey, t.welcomeBot])
+
+  function saveArchive(nextMessages) {
+    const hasUserMessage = nextMessages.some((msg) => msg.role === "user")
+    if (!hasUserMessage) return
+
+    const sessionId = currentChatId || `${Date.now()}`
+    if (!currentChatId) setCurrentChatId(sessionId)
+    const title = nextMessages.find((msg) => msg.role === "user")?.text?.slice(0, 70) || "Legal question"
+    const session = {
+      id: sessionId,
+      title,
+      updated_at: new Date().toISOString(),
+      messages: nextMessages,
+    }
+
+    setArchivedChats((current) => {
+      const withoutCurrent = current.filter((entry) => entry.id !== session.id)
+      const updated = [session, ...withoutCurrent].slice(0, 20)
+      try {
+        localStorage.setItem(archiveKey, JSON.stringify(updated))
+      } catch {
+        // History is best effort if browser storage is unavailable.
+      }
+      return updated
+    })
+  }
 
   async function sendMessage() {
     const question = inputText.trim()
@@ -1340,7 +1429,9 @@ function ChatPage({ user, t }) {
         ? botReply.answer
         : fallback_answer(question)
       const cleanAnswer = formatReply(cleanResponse(answer))
-      setMessages([...chatSoFar, { role: "bot", text: cleanAnswer }])
+      const nextMessages = [...chatSoFar, { role: "bot", text: cleanAnswer }]
+      setMessages(nextMessages)
+      saveArchive(nextMessages)
     } catch (err) {
       setMessages([...chatSoFar, { role: "bot", text: err.message }])
     } finally {
@@ -1349,12 +1440,15 @@ function ChatPage({ user, t }) {
   }
 
   function clearChatHistory() {
+    setCurrentChatId(null)
     setMessages(initialMessages)
-    try {
-      localStorage.removeItem(storageKey)
-    } catch {
-      // Ignore storage cleanup failures.
-    }
+  }
+
+  function openArchivedChat(chat) {
+    if (!Array.isArray(chat.messages)) return
+    setCurrentChatId(chat.id)
+    setMessages(chat.messages)
+    setShowHistory(false)
   }
 
   return (
@@ -1371,10 +1465,28 @@ function ChatPage({ user, t }) {
         {/* Chat header bar */}
         <div className="chat-header">
           <img className="chat-avatar" src="/paklaw-logo-embedded.png" alt="PakLaw AI logo" />
+          <button type="button" className="ghost-btn" onClick={() => setShowHistory((current) => !current)}>
+            Previous chats
+          </button>
           <button type="button" className="ghost-btn" onClick={clearChatHistory}>
             {t.clearHistory}
           </button>
         </div>
+
+        {showHistory && (
+          <div className="chat-history-panel">
+            {archivedChats.length === 0 ? (
+              <p className="empty-state compact">No previous chats yet.</p>
+            ) : (
+              archivedChats.map((chat) => (
+                <button key={chat.id} type="button" className="history-item" onClick={() => openArchivedChat(chat)}>
+                  <span>{chat.title}</span>
+                  <small>{new Date(chat.updated_at).toLocaleString()}</small>
+                </button>
+              ))
+            )}
+          </div>
+        )}
 
         <div className="quick-prompts">
           {quickPrompts.map((prompt) => (
@@ -1600,6 +1712,23 @@ function AdminDashboard({ t }) {
     }
   }
 
+  async function handleDeleteUser(userId) {
+    setStatusMessage("")
+    try {
+      const result = await apiRequest(`/admin/users/${userId}`, {
+        method: "DELETE",
+      })
+      if (result.success === false) {
+        setStatusMessage(result.message || "Unable to delete user.")
+        return
+      }
+      await loadData()
+      setStatusMessage("User deleted.")
+    } catch (err) {
+      setStatusMessage(err.message)
+    }
+  }
+
   const pendingLawyers = lawyers.filter(l => l.verification_status === "pending")
   const approvedLawyers = lawyers.filter(l => l.verification_status === "approved")
 
@@ -1745,7 +1874,11 @@ function AdminDashboard({ t }) {
                     <th>Email</th>
                     <th>Phone</th>
                     <th>City</th>
+                    <th>Provider</th>
+                    <th>Logins</th>
+                    <th>Last active</th>
                     <th>Registered</th>
+                    <th>Action</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1755,7 +1888,13 @@ function AdminDashboard({ t }) {
                       <td>{registeredUser.email || "-"}</td>
                       <td>{registeredUser.phone || "-"}</td>
                       <td>{registeredUser.city || "-"}</td>
+                      <td>{registeredUser.auth_provider || "-"}</td>
+                      <td>{registeredUser.login_count ?? 0}</td>
+                      <td>{registeredUser.last_login || "-"}</td>
                       <td>{registeredUser.created_at || "-"}</td>
+                      <td className="row-actions">
+                        <button className="reject-btn" onClick={() => handleDeleteUser(registeredUser.id)}>{t.remove}</button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1770,9 +1909,10 @@ function AdminDashboard({ t }) {
 
 // ─── ROOT APP ─────────────────────────────────────────────────
 export default function App() {
-  const [screen, setScreen] = useState("login")
+  const savedUser = loadSession()
+  const [screen, setScreen] = useState(savedUser ? "main" : "login")
   const [currentPage, setCurrentPage] = useState("chat")
-  const [user, setUser] = useState(null)
+  const [user, setUser] = useState(savedUser)
   const [theme, setTheme] = useState(() => getSavedTheme())
   const [lang, setLang] = useState(() => getSavedLanguage())
   const [showProfile, setShowProfile] = useState(false)
@@ -1796,6 +1936,7 @@ export default function App() {
 
   function handleLogin(data) {
     saveProfile(data)
+    saveSession(data)
     setUser(data)
     setCurrentPage(data.role === "admin" ? "admin" : "chat")
     setScreen("main")
@@ -1810,6 +1951,7 @@ export default function App() {
   }
 
   function handleLogout() {
+    clearSession()
     setUser(null)
     setScreen("login")
   }
@@ -1832,11 +1974,7 @@ export default function App() {
       <LoginPage
         t={t}
         onLogin={handleLogin}
-        onCreateAccount={() => setScreen("chooseRole")}
-        onForgotPassword={(email) => {
-          setForgotEmail(email || "")
-          setShowForgotPassword(true)
-        }}
+        onCreateAccount={() => setScreen("lawyerSignup")}
       />
       <ForgotPasswordModal
         open={showForgotPassword}

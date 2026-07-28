@@ -873,6 +873,39 @@ input:focus, select:focus, textarea:focus {
   color: var(--blue);
 }
 
+.chat-history-panel {
+  display: grid;
+  gap: 8px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-soft) 88%, transparent);
+  max-height: 220px;
+  overflow: auto;
+}
+
+.history-item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+}
+
+.history-item span {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-item small {
+  color: var(--muted);
+}
+
 .chat-messages {
   flex: 1;
   min-height: 400px;
@@ -1323,6 +1356,10 @@ tr:last-child td {
   color: var(--muted);
   font-size: 14px;
   font-style: italic;
+}
+
+.empty-state.compact {
+  padding: 10px;
 }
 
 /* ── Responsive ── */
