@@ -383,9 +383,11 @@ async function fallbackApiRequest(path, options = {}, upstreamData = null) {
       }
     }
 
-    return upstreamData && upstreamData.message
-      ? upstreamData
-      : { success: false, message: "Invalid email or password." }
+    const registeredEmail = state.users.some((entry) => entry.email === email) || state.lawyers.some((entry) => entry.email === email)
+    if (upstreamData && upstreamData.message) return upstreamData
+    return registeredEmail
+      ? { success: false, message: "Incorrect password. Please try again." }
+      : { success: false, message: "This email address is not registered. Please create a new account first." }
   }
 
   if (path === "/auth/google" && method === "POST") {
@@ -791,7 +793,7 @@ function AuthShell({ title, subtitle, children, t }) {
 
 // ─── LOGIN PAGE ───────────────────────────────────────────────
 function LoginPage({ onLogin, onCreateAccount, t }) {
-  const [form, setForm] = useState({ email: "" })
+  const [form, setForm] = useState({ email: "", password: "" })
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
@@ -808,22 +810,26 @@ function LoginPage({ onLogin, onCreateAccount, t }) {
       setError("Please enter a valid email address.")
       return
     }
+    if (!form.password) {
+      setError("Please enter your password.")
+      return
+    }
 
     setLoading(true)
     setError("")
 
     try {
-      const data = await apiRequest("/auth/google", {
+      const data = await apiRequest("/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: form.email }),
+        body: JSON.stringify(form),
       })
 
       if (data.success) {
-        const profile = loadProfile(form.email) || { email: form.email, name: data.name, role: data.role, auth_provider: "google" }
-        onLogin(mergeProfile(profile, { ...data, auth_provider: "google" }))
+        const profile = loadProfile(form.email) || { email: form.email, name: data.name, role: data.role }
+        onLogin(mergeProfile(profile, data))
       } else {
-        setError(data.message || "Unable to continue with Google.")
+        setError(data.message || "Invalid email or password.")
       }
     } catch (err) {
       setError(err.message)
@@ -836,22 +842,30 @@ function LoginPage({ onLogin, onCreateAccount, t }) {
     <AuthShell title={t.loginTitle} subtitle={t.loginSubtitle} t={t}>
       <form onSubmit={handleLogin} className="form-stack">
         <TextInput
-          label="Google email"
+          label={t.emailLabel}
           type="email"
           value={form.email}
           onChange={updateField("email")}
-          placeholder="you@gmail.com"
+          placeholder="you@example.com"
           autoComplete="email"
+        />
+        <TextInput
+          label={t.passwordLabel}
+          type="password"
+          value={form.password}
+          onChange={updateField("password")}
+          placeholder={t.passwordPlaceholder}
+          autoComplete="current-password"
         />
         {error && <p className="form-error">{error}</p>}
         <button className="primary-btn" type="submit" disabled={loading}>
-          {loading ? "Checking..." : "Continue with Google"}
+          {loading ? "Logging in..." : "Log In"}
         </button>
       </form>
       <div className="auth-footer">
         <div className="auth-footer-actions">
           <button className="secondary-btn auth-action-btn" type="button" onClick={onCreateAccount}>
-            Register as lawyer
+            {t.createAccount}
           </button>
         </div>
       </div>
@@ -961,28 +975,18 @@ function ForgotPasswordModal({ open, initialEmail = "", onClose, onReset, t }) {
 
 // ─── CHOOSE ROLE PAGE ─────────────────────────────────────────
 function ChooseRolePage({ onChoose, onBack, t }) {
-  const [authMethod, setAuthMethod] = useState("google")
-
   return (
     <AuthShell
       title={t.chooseRoleTitle}
       subtitle={t.chooseRoleSubtitle}
       t={t}
     >
-      <div className="auth-methods" aria-label="Account creation method">
-        <button type="button" className={authMethod === "google" ? "method-btn active" : "method-btn"} onClick={() => setAuthMethod("google")}>
-          Google
-        </button>
-        <button type="button" className={authMethod === "email" ? "method-btn active" : "method-btn"} onClick={() => setAuthMethod("email")}>
-          Email
-        </button>
-      </div>
       <div className="role-grid">
-        <button className="role-card" onClick={() => onChoose("user", authMethod)}>
+        <button className="role-card" onClick={() => onChoose("user", "email")}>
           <strong>{t.chooseRoleUser}</strong>
           <span>{t.chooseRoleUserDesc}</span>
         </button>
-        <button className="role-card" onClick={() => onChoose("lawyer", authMethod)}>
+        <button className="role-card" onClick={() => onChoose("lawyer", "email")}>
           <strong>{t.chooseRoleLawyer}</strong>
           <span>{t.chooseRoleLawyerDesc}</span>
         </button>
@@ -999,8 +1003,6 @@ function getUserErrors(form) {
   const errors = {}
   if (!isValidName(form.full_name)) errors.full_name = "Name must be at least 3 letters."
   if (!isValidEmail(form.email)) errors.email = "Enter a valid email address."
-  if (!isValidPhone(form.phone)) errors.phone = "Enter a valid Pakistani mobile number (e.g. 03001234567)."
-  if (!isValidCity(form.city)) errors.city = "City name must contain letters only."
   if (!isStrongPassword(form.password)) errors.password = "Password must be at least 8 characters and include a letter and a number."
   if (form.password !== form.confirm) errors.confirm = "Passwords do not match."
   return errors
@@ -1039,8 +1041,8 @@ function UserSignupPage({ onSuccess, onBack, t, authMethod = "email" }) {
           const profile = {
             name: form.full_name,
             email: form.email,
-            phone: form.phone,
-            city: form.city,
+            phone: "",
+            city: "",
             password: form.password,
             role: "user",
             auth_provider: authMethod,
@@ -1065,9 +1067,7 @@ function UserSignupPage({ onSuccess, onBack, t, authMethod = "email" }) {
     >
       <form className="form-stack" onSubmit={handleSubmit}>
         <TextInput label={t.nameLabel} value={form.full_name} onChange={updateField("full_name")} error={errors.full_name} maxLength={60} pattern="[A-Za-z .'-]{3,}" />
-        <TextInput label={authMethod === "google" ? "Google email" : t.emailLabel} type="email" value={form.email} onChange={updateField("email")} error={errors.email} autoComplete="email" />
-        <TextInput label={t.phoneLabel} value={form.phone} onChange={updateField("phone")} error={errors.phone} placeholder="03001234567" inputMode="tel" maxLength={13} />
-        <TextInput label={t.cityLabel} value={form.city} onChange={updateField("city")} error={errors.city} maxLength={40} />
+        <TextInput label={t.emailLabel} type="email" value={form.email} onChange={updateField("email")} error={errors.email} autoComplete="email" />
         <TextInput label={t.passwordLabel} type="password" value={form.password} onChange={updateField("password")} error={errors.password} minLength={8} autoComplete="new-password" />
         <TextInput label={`Confirm ${t.passwordLabel}`} type="password" value={form.confirm} onChange={updateField("confirm")} error={errors.confirm} minLength={8} autoComplete="new-password" />
         {serverMessage && <p className="form-error">{serverMessage}</p>}
@@ -1974,7 +1974,7 @@ export default function App() {
       <LoginPage
         t={t}
         onLogin={handleLogin}
-        onCreateAccount={() => setScreen("lawyerSignup")}
+        onCreateAccount={() => setScreen("chooseRole")}
       />
       <ForgotPasswordModal
         open={showForgotPassword}

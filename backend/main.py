@@ -182,17 +182,24 @@ def validation_error(message):
     return {"success": False, "message": message}
 
 
-def validate_common(name, email, phone, city, password):
+def validate_common(name, email, password):
     if not valid_name(name):
         return "Name should contain letters only and be at least 3 characters."
     if not valid_email(email):
         return "Enter a valid email address."
+    if not valid_password(password):
+        return "Password must be at least 8 characters and include a letter and a number."
+    return None
+
+
+def validate_lawyer_common(name, email, phone, city, password):
+    error = validate_common(name, email, password)
+    if error:
+        return error
     if not valid_phone(phone):
         return "Enter a valid Pakistani mobile number."
     if not valid_city(city):
         return "City should contain letters only."
-    if not valid_password(password):
-        return "Password must be at least 8 characters and include a letter and a number."
     return None
 
 
@@ -234,8 +241,8 @@ def send_reset_email(email, code):
 class UserSignup(BaseModel):
     full_name: str
     email: str
-    phone: str
-    city: str
+    phone: str = ""
+    city: str = ""
     password: str
 
 
@@ -314,7 +321,7 @@ def fallback_answer(question: str) -> str:
 
 @app.post("/signup/user")
 def signup_user(data: UserSignup):
-    error = validate_common(data.full_name, data.email, data.phone, data.city, data.password)
+    error = validate_common(data.full_name, data.email, data.password)
     if error:
         return validation_error(error)
 
@@ -344,7 +351,7 @@ def signup_user(data: UserSignup):
 
 @app.post("/signup/lawyer")
 def signup_lawyer(data: LawyerSignup):
-    error = validate_common(data.lawyer_name, data.email, data.phone, data.city, data.password)
+    error = validate_lawyer_common(data.lawyer_name, data.email, data.phone, data.city, data.password)
     if error:
         return validation_error(error)
     if not valid_dba(data.dba_number):
@@ -449,8 +456,16 @@ def login(data: LoginData):
             "verification_status": lawyer["verification_status"],
         }
 
+    email = data.email.strip().lower()
+    cursor.execute("SELECT 1 FROM users WHERE email=?", (email,))
+    user_email_exists = cursor.fetchone() is not None
+    cursor.execute("SELECT 1 FROM lawyers WHERE email=?", (email,))
+    lawyer_email_exists = cursor.fetchone() is not None
+
     conn.close()
-    return {"success": False, "message": "Invalid email or password."}
+    if not user_email_exists and not lawyer_email_exists:
+        return {"success": False, "message": "This email address is not registered. Please create a new account first."}
+    return {"success": False, "message": "Incorrect password. Please try again."}
 
 
 @app.post("/auth/google")
