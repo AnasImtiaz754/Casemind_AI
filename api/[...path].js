@@ -1,5 +1,7 @@
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 const DEFAULT_CHAT_MODEL = process.env.GROQ_MODEL?.trim() || "openai/gpt-oss-120b"
+const OPENAI_API_URL = "https://api.openai.com/v1/responses"
+const OPENAI_MODEL = process.env.OPENAI_MODEL?.trim() || "gpt-6-luna"
 
 function fallbackAnswer(question = "") {
   const text = String(question || "").toLowerCase()
@@ -98,6 +100,31 @@ function compactHistory(history) {
     }))
 }
 
+async function requestOpenAI(question, history) {
+  if (!process.env.OPENAI_API_KEY) return ""
+  const response = await fetch(OPENAI_API_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      input: [
+        {
+          role: "developer",
+          content: "You are CaseMind AI, a Pakistani legal assistant. Answer in the user's language with detailed, mobile-friendly sections: Direct answer, Pakistani legal context, What to do now, Documents or proof to keep, and When to speak with a lawyer. Do not invent statutes or citations; state uncertainty clearly and recommend a licensed lawyer for formal advice.",
+        },
+        ...compactHistory(history),
+        { role: "user", content: question },
+      ],
+      max_output_tokens: 1200,
+    }),
+  })
+  const data = await response.json()
+  return response.ok && typeof data?.output_text === "string" ? data.output_text.trim() : ""
+}
+
 async function handleAsk(req, res) {
   if (req.method !== "POST") {
     res.status(405).json({ success: false, message: "Method not allowed." })
@@ -111,18 +138,8 @@ async function handleAsk(req, res) {
     return
   }
 
-  if (!process.env.GROQ_API_KEY) {
-    res.status(503).json({
-      success: false,
-      answer: fallbackAnswer(question),
-      mode: "fallback",
-      message: "GROQ_API_KEY is not configured.",
-    })
-    return
-  }
-
   try {
-    const upstream = await fetch(GROQ_API_URL, {
+    const upstream = process.env.GROQ_API_KEY ? await fetch(GROQ_API_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
@@ -142,29 +159,35 @@ async function handleAsk(req, res) {
         temperature: 0.25,
         max_tokens: 1200,
       }),
-    })
+    }) : null
 
-    const data = await upstream.json()
-    const answer = data?.choices?.[0]?.message?.content?.trim()
+    if (upstream) {
+      const data = await upstream.json()
+      const answer = data?.choices?.[0]?.message?.content?.trim()
+      if (upstream.ok && answer) {
+        res.status(200).json({ success: true, answer, mode: "groq" })
+        return
+      }
+    }
 
-    if (!upstream.ok || !answer) {
-      res.status(502).json({
-        success: false,
-        answer: fallbackAnswer(question),
-        mode: "fallback",
-        message: data?.error?.message || "The AI service returned an incomplete response.",
-      })
+    const openAiAnswer = await requestOpenAI(question, body.history)
+    if (openAiAnswer) {
+      res.status(200).json({ success: true, answer: openAiAnswer, mode: "openai" })
       return
     }
 
-    res.status(200).json({ success: true, answer, mode: "ai" })
+    res.status(503).json({ success: false, answer: fallbackAnswer(question), mode: "fallback", message: "No configured AI provider returned a response." })
   } catch (error) {
-    res.status(502).json({
-      success: false,
-      answer: fallbackAnswer(question),
-      mode: "fallback",
-      message: error?.message || "Failed to reach the AI service.",
-    })
+    try {
+      const openAiAnswer = await requestOpenAI(question, body.history)
+      if (openAiAnswer) {
+        res.status(200).json({ success: true, answer: openAiAnswer, mode: "openai" })
+        return
+      }
+    } catch {
+      // Keep provider details server-side and return the structured fallback below.
+    }
+    res.status(503).json({ success: false, answer: fallbackAnswer(question), mode: "fallback", message: "The configured AI providers are unavailable." })
   }
 }
 
