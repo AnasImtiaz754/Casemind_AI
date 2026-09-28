@@ -24,6 +24,13 @@ app.add_middleware(
 
 DB_PATH = Path(__file__).with_name("casemind.db")
 RESET_CODE_TTL_SECONDS = 15 * 60
+BAR_COUNCILS = {
+    "Pakistan Bar Council", "Punjab Bar Council", "Sindh Bar Council",
+    "Khyber Pakhtunkhwa Bar Council", "Balochistan Bar Council", "Islamabad Bar Council",
+    "Azad Jammu & Kashmir Bar Council", "Gilgit-Baltistan Bar Council",
+}
+PAKISTAN_CITIES = {"Lahore", "Faisalabad", "Rawalpindi", "Gujranwala", "Multan", "Sargodha", "Sialkot", "Bahawalpur", "Sheikhupura", "Gujrat", "Sahiwal", "Okara", "Rahim Yar Khan", "Kasur", "Dera Ghazi Khan", "Jhang", "Wah Cantonment", "Hafizabad", "Chiniot", "Jhelum", "Kamoke", "Khanewal", "Sadiqabad", "Muridke", "Khanpur", "Bahawalnagar", "Mandi Bahauddin", "Daska", "Pakpattan", "Chakwal", "Gojra", "Vehari", "Burewala", "Muzaffargarh", "Layyah", "Attock", "Mianwali", "Karachi", "Hyderabad", "Sukkur", "Larkana", "Nawabshah", "Mirpur Khas", "Jacobabad", "Shikarpur", "Khairpur", "Dadu", "Tando Adam", "Tando Allahyar", "Peshawar", "Mardan", "Mingora", "Abbottabad", "Kohat", "Dera Ismail Khan", "Nowshera", "Charsadda", "Swabi", "Mansehra", "Bannu", "Quetta", "Turbat", "Khuzdar", "Hub", "Chaman", "Gwadar", "Islamabad", "Muzaffarabad", "Mirpur", "Gilgit"}
+PRACTICE_AREAS = {"Criminal Law", "Family Law", "Civil Law / Civil Litigation", "Corporate / Commercial Law", "Real Estate / Property Law", "Banking & Finance", "Constitutional Law / Writ Petitions", "Tax Law", "Labour / Employment Law", "Intellectual Property (IP)", "Cyber Crime / PECA / Digital Law", "White Collar Crime / NAB / FIA matters", "Arbitration / ADR", "Immigration", "Human Rights", "Environmental Law", "Mining & Minerals", "Consumer Protection", "Insurance", "Admiralty / Maritime", "General Practice"}
 
 
 def load_local_env():
@@ -118,6 +125,8 @@ def init_db():
         cursor.execute("ALTER TABLE lawyers ADD COLUMN verification_status TEXT DEFAULT 'pending'")
     if "cnic_number" not in columns:
         cursor.execute("ALTER TABLE lawyers ADD COLUMN cnic_number TEXT")
+    if "bar_council" not in columns:
+        cursor.execute("ALTER TABLE lawyers ADD COLUMN bar_council TEXT")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS password_resets (
@@ -153,11 +162,16 @@ def valid_name(value):
 
 
 def valid_city(value):
-    return re.match(r"^[A-Za-z ]{2,}$", (value or "").strip()) is not None
+    return (value or "").strip() in PAKISTAN_CITIES
 
 
 def valid_dba(value):
-    return re.match(r"^[A-Za-z0-9/-]{3,24}$", (value or "").strip()) is not None
+    return re.match(r"^[A-Za-z0-9/-]{4,15}$", (value or "").strip()) is not None
+
+
+def valid_specializations(value):
+    selected = value if isinstance(value, list) else [part.strip() for part in str(value or "").split(",") if part.strip()]
+    return 1 <= len(selected) <= 8 and all(item in PRACTICE_AREAS for item in selected)
 
 
 def valid_cnic(value):
@@ -253,9 +267,10 @@ class LawyerSignup(BaseModel):
     email: str
     phone: str
     city: str
+    bar_council: str
     dba_number: str
     cnic_number: str
-    specialization: str
+    specialization: list[str]
     password: str
 
 
@@ -357,11 +372,13 @@ def signup_lawyer(data: LawyerSignup):
     if error:
         return validation_error(error)
     if not valid_dba(data.dba_number):
-        return validation_error("DBA number should contain only letters, numbers, slash, or dash.")
+        return validation_error("DBA number must be 4-15 letters/numbers with optional hyphens or slashes.")
+    if data.bar_council not in BAR_COUNCILS:
+        return validation_error("Select a valid issuing Bar Council.")
     if not valid_cnic(data.cnic_number):
         return validation_error("CNIC should use 13 digits, for example 35202-1234567-1.")
-    if len(data.specialization.strip()) < 3:
-        return validation_error("Enter a valid specialization.")
+    if not valid_specializations(data.specialization):
+        return validation_error("Select between 1 and 8 valid practice areas.")
 
     try:
         conn = get_connection()
@@ -372,17 +389,18 @@ def signup_lawyer(data: LawyerSignup):
             return validation_error("Email already exists.")
         cursor.execute("""
             INSERT INTO lawyers (
-                lawyer_name, email, phone, city, dba_number, cnic_number, specialization, password, verification_status
+                lawyer_name, email, phone, city, bar_council, dba_number, cnic_number, specialization, password, verification_status
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
         """, (
             data.lawyer_name.strip(),
             email,
             data.phone.strip(),
             data.city.strip(),
+            data.bar_council,
             data.dba_number.strip().upper(),
             normalize_cnic(data.cnic_number),
-            data.specialization.strip(),
+            ", ".join(data.specialization),
             hash_password(data.password),
         ))
         conn.commit()
@@ -436,7 +454,7 @@ def login(data: LoginData):
 
     cursor.execute(
         """
-        SELECT id, lawyer_name, email, phone, city, dba_number, cnic_number, specialization, verification_status
+        SELECT id, lawyer_name, email, phone, city, bar_council, dba_number, cnic_number, specialization, verification_status
         FROM lawyers
         WHERE email=? AND password=?
         """,
@@ -452,6 +470,7 @@ def login(data: LoginData):
             "email": lawyer["email"],
             "phone": lawyer["phone"],
             "city": lawyer["city"],
+            "bar_council": lawyer["bar_council"],
             "dba_number": lawyer["dba_number"],
             "cnic_number": lawyer["cnic_number"],
             "specialization": lawyer["specialization"],
@@ -606,6 +625,7 @@ def lawyer_dict(row):
         "email": row["email"],
         "phone": row["phone"],
         "city": row["city"],
+        "bar_council": row["bar_council"],
         "dba_number": row["dba_number"],
         "cnic_number": row["cnic_number"],
         "specialization": row["specialization"],
@@ -632,7 +652,7 @@ def get_lawyers():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT id, lawyer_name, email, phone, city, dba_number, cnic_number, specialization, verification_status
+        SELECT id, lawyer_name, email, phone, city, bar_council, dba_number, cnic_number, specialization, verification_status
         FROM lawyers
         WHERE verification_status='approved'
         ORDER BY lawyer_name
@@ -668,7 +688,7 @@ def admin_lawyers():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT id, lawyer_name, email, phone, city, dba_number, cnic_number, specialization, verification_status
+        SELECT id, lawyer_name, email, phone, city, bar_council, dba_number, cnic_number, specialization, verification_status
         FROM lawyers
         ORDER BY created_at DESC
     """)

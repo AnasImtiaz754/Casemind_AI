@@ -23,6 +23,37 @@ const THEME_STORAGE_KEY = "casemind_theme"
 const AUTH_SESSION_KEY = "casemind_active_user"
 const CHAT_ARCHIVE_PREFIX = "casemind_chat_archive:"
 
+const BAR_COUNCILS = [
+  "Pakistan Bar Council",
+  "Punjab Bar Council",
+  "Sindh Bar Council",
+  "Khyber Pakhtunkhwa Bar Council",
+  "Balochistan Bar Council",
+  "Islamabad Bar Council",
+  "Azad Jammu & Kashmir Bar Council",
+  "Gilgit-Baltistan Bar Council",
+]
+
+const PAKISTAN_CITIES = [
+  "Lahore", "Faisalabad", "Rawalpindi", "Gujranwala", "Multan", "Sargodha", "Sialkot", "Bahawalpur",
+  "Sheikhupura", "Gujrat", "Sahiwal", "Okara", "Rahim Yar Khan", "Kasur", "Dera Ghazi Khan", "Jhang",
+  "Wah Cantonment", "Hafizabad", "Chiniot", "Jhelum", "Kamoke", "Khanewal", "Sadiqabad", "Muridke",
+  "Khanpur", "Bahawalnagar", "Mandi Bahauddin", "Daska", "Pakpattan", "Chakwal", "Gojra", "Vehari",
+  "Burewala", "Muzaffargarh", "Layyah", "Attock", "Mianwali", "Karachi", "Hyderabad", "Sukkur",
+  "Larkana", "Nawabshah", "Mirpur Khas", "Jacobabad", "Shikarpur", "Khairpur", "Dadu", "Tando Adam",
+  "Tando Allahyar", "Peshawar", "Mardan", "Mingora", "Abbottabad", "Kohat", "Dera Ismail Khan", "Nowshera",
+  "Charsadda", "Swabi", "Mansehra", "Bannu", "Quetta", "Turbat", "Khuzdar", "Hub", "Chaman", "Gwadar",
+  "Islamabad", "Muzaffarabad", "Mirpur", "Gilgit",
+]
+
+const PRACTICE_AREAS = [
+  "Criminal Law", "Family Law", "Civil Law / Civil Litigation", "Corporate / Commercial Law", "Real Estate / Property Law",
+  "Banking & Finance", "Constitutional Law / Writ Petitions", "Tax Law", "Labour / Employment Law", "Intellectual Property (IP)",
+  "Cyber Crime / PECA / Digital Law", "White Collar Crime / NAB / FIA matters", "Arbitration / ADR", "Immigration",
+  "Human Rights", "Environmental Law", "Mining & Minerals", "Consumer Protection", "Insurance", "Admiralty / Maritime",
+  "General Practice",
+]
+
 const STRINGS = {
   en: {
     appName: "CaseMind AI",
@@ -222,9 +253,10 @@ const emptyLawyerForm = {
   email: "",
   phone: "",
   city: "",
+  bar_council: "",
   dba_number: "",
   cnic_number: "",
-  specialization: "",
+  specialization: [],
   password: "",
   confirm: "",
 }
@@ -1097,10 +1129,11 @@ function getLawyerErrors(form) {
   if (!isValidName(form.lawyer_name)) errors.lawyer_name = "Name must be at least 3 letters."
   if (!isValidEmail(form.email)) errors.email = "Enter a valid email address."
   if (!isValidPhone(form.phone)) errors.phone = "Enter a valid Pakistani mobile number."
-  if (!isValidCity(form.city)) errors.city = "City name must contain letters only."
-  if (!isValidDba(form.dba_number)) errors.dba_number = "DBA number must be 3-24 characters (letters, numbers, /, -)."
+  if (!PAKISTAN_CITIES.includes(form.city)) errors.city = "Select a valid Pakistani city from the list."
+  if (!BAR_COUNCILS.includes(form.bar_council)) errors.bar_council = "Select the issuing Bar Council."
+  if (!/^[A-Za-z0-9/-]{4,15}$/.test((form.dba_number || "").trim())) errors.dba_number = "Use 4-15 letters/numbers with optional hyphens or slashes."
   if (!isValidCnic(form.cnic_number)) errors.cnic_number = "CNIC must be 13 digits, e.g. 35202-1234567-1."
-  if ((form.specialization || "").trim().length < 3) errors.specialization = "Enter your area of specialization."
+  if (!Array.isArray(form.specialization) || form.specialization.length < 1 || form.specialization.length > 8) errors.specialization = "Select 1 to 8 practice areas."
   if (!isStrongPassword(form.password)) errors.password = "Password must be at least 8 characters and include a letter and a number."
   if (form.password !== form.confirm) errors.confirm = "Passwords do not match."
   return errors
@@ -1114,7 +1147,10 @@ function LawyerSignupPage({ onSuccess, onBack, t, authMethod = "email" }) {
 
   function updateField(field) {
     return function (e) {
-      setForm({ ...form, [field]: e.target.value })
+      const value = field === "specialization"
+        ? Array.from(e.target.selectedOptions, (option) => option.value)
+        : e.target.value
+      setForm({ ...form, [field]: value })
     }
   }
 
@@ -1141,9 +1177,10 @@ function LawyerSignupPage({ onSuccess, onBack, t, authMethod = "email" }) {
             email: form.email,
             phone: form.phone,
             city: form.city,
+            bar_council: form.bar_council,
             dba_number: form.dba_number,
             cnic_number: normalizeCnic(form.cnic_number),
-            specialization: form.specialization,
+            specialization: form.specialization.join(", "),
             password: form.password,
             role: "lawyer",
             verification_status: "pending",
@@ -1171,10 +1208,11 @@ function LawyerSignupPage({ onSuccess, onBack, t, authMethod = "email" }) {
         <TextInput label={t.nameLabel} value={form.lawyer_name} onChange={updateField("lawyer_name")} error={errors.lawyer_name} maxLength={60} pattern="[A-Za-z .'-]{3,}" />
         <TextInput label={authMethod === "google" ? "Google email" : t.emailLabel} type="email" value={form.email} onChange={updateField("email")} error={errors.email} autoComplete="email" />
         <TextInput label={t.phoneLabel} value={form.phone} onChange={updateField("phone")} error={errors.phone} placeholder="03001234567" inputMode="tel" maxLength={13} />
-        <TextInput label={t.cityLabel} value={form.city} onChange={updateField("city")} error={errors.city} maxLength={40} />
-        <TextInput label={t.dbaLabel} value={form.dba_number} onChange={updateField("dba_number")} error={errors.dba_number} placeholder="424 or 123-G/2018" maxLength={20} />
+        <label className="field-label">{t.cityLabel}<select value={form.city} onChange={updateField("city")} aria-invalid={Boolean(errors.city)}><option value="">Select city</option>{PAKISTAN_CITIES.map((city) => <option key={city} value={city}>{city}</option>)}</select>{errors.city && <span className="field-error">{errors.city}</span>}</label>
+        <label className="field-label">Issuing Bar Council<select value={form.bar_council} onChange={updateField("bar_council")} aria-invalid={Boolean(errors.bar_council)}><option value="">Select Bar Council</option>{BAR_COUNCILS.map((council) => <option key={council} value={council}>{council}</option>)}</select>{errors.bar_council && <span className="field-error">{errors.bar_council}</span>}</label>
+        <TextInput label={t.dbaLabel} value={form.dba_number} onChange={updateField("dba_number")} error={errors.dba_number} placeholder="PBC-1234 or 123-G/2018" maxLength={15} />
         <TextInput label={t.cnicLabel} value={form.cnic_number} onChange={updateField("cnic_number")} error={errors.cnic_number} placeholder="35202-1234567-1" inputMode="numeric" maxLength={15} />
-        <TextInput label={t.specializationLabel} value={form.specialization} onChange={updateField("specialization")} error={errors.specialization} placeholder="e.g. Family Law, Criminal Law" maxLength={50} />
+        <label className="field-label">{t.specializationLabel} <span className="field-hint">Select up to 8 areas</span><select multiple size={5} value={form.specialization} onChange={updateField("specialization")} aria-invalid={Boolean(errors.specialization)}>{PRACTICE_AREAS.map((area) => <option key={area} value={area}>{area}</option>)}</select>{errors.specialization && <span className="field-error">{errors.specialization}</span>}</label>
         <TextInput label={t.passwordLabel} type="password" value={form.password} onChange={updateField("password")} error={errors.password} minLength={8} autoComplete="new-password" />
         <TextInput label={`Confirm ${t.passwordLabel}`} type="password" value={form.confirm} onChange={updateField("confirm")} error={errors.confirm} minLength={8} autoComplete="new-password" />
         {serverMessage && <p className="form-error">{serverMessage}</p>}
@@ -1290,6 +1328,7 @@ function ProfileCard({ user, t, onSaveProfile }) {
   ]
 
   if (user?.role === "lawyer") {
+    rows.push(["Bar Council", user?.bar_council || "-"])
     rows.push([t.dbaLabel, user?.dba_number || "-"])
     rows.push([t.cnicLabel, user?.cnic_number || "-"])
     rows.push([t.specializationLabel, user?.specialization || "-"])

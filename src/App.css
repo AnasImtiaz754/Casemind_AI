@@ -251,6 +251,25 @@ input:focus, select:focus, textarea:focus {
   color: var(--danger);
 }
 
+.field-label {
+  display: grid;
+  gap: 6px;
+  color: var(--navy);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.field-label select[multiple] {
+  min-height: 132px;
+  appearance: auto;
+}
+
+.field-hint {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
 .form-error {
   font-size: 13px;
   font-weight: 600;
