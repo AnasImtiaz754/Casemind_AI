@@ -726,12 +726,22 @@ input:focus, select:focus, textarea:focus {
 }
 
 .quick-prompts {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+  display: flex;
+  overflow: hidden;
   gap: 10px;
   padding: 14px 18px 16px;
   border-bottom: 1px solid rgba(23, 50, 77, 0.08);
   background: linear-gradient(180deg, rgba(252, 252, 251, 0.98), rgba(246, 244, 239, 0.98));
+}
+
+.quick-prompts .prompt-chip {
+  flex: 1 1 0;
+  animation: prompt-slide-in 650ms ease both;
+}
+
+@keyframes prompt-slide-in {
+  from { opacity: 0; transform: translateX(34px); }
+  to { opacity: 1; transform: translateX(0); }
 }
 
 .prompt-chip {

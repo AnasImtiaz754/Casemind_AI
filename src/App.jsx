@@ -291,10 +291,21 @@ async function apiRequest(path, options = {}) {
     if (path === "/ask" && typeof data?.answer === "string" && data.answer.trim()) {
       return data
     }
+    // Account data must never fall back to browser-only storage. A local mock
+    // makes registration appear successful while losing it on other devices.
+    if (path !== "/ask") {
+      return data || { success: false, message: "The account service is unavailable. Please try again shortly." }
+    }
     return fallbackApiRequest(path, options, data)
   } catch (err) {
     if (err.name === "AbortError") {
+      if (path !== "/ask") {
+        return { success: false, message: "The account service timed out. Please try again." }
+      }
       return fallbackApiRequest(path, options)
+    }
+    if (path !== "/ask") {
+      return { success: false, message: "The account service is unavailable. Please check the connection and try again." }
     }
     return fallbackApiRequest(path, options)
   } finally {
@@ -1354,11 +1365,21 @@ function ChatPage({ user, t }) {
   const [inputText, setInputText] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const bottomRef = useRef(null)
-  const quickPrompts = useMemo(() => [
-    t.quickPromptProperty,
-    t.quickPromptDba,
-    t.quickPromptFamily,
-  ], [t])
+  const quickPrompts = useMemo(() => {
+    const pool = [
+      t.quickPromptProperty,
+      t.quickPromptDba,
+      t.quickPromptFamily,
+      "What should I do after receiving a legal notice?",
+      "How can I recover money owed to me?",
+      "What evidence should I preserve for a dispute?",
+      "How do I report online harassment in Pakistan?",
+      "What are the steps for a police complaint?",
+      "Can a tenant be evicted without notice?",
+    ].filter(Boolean)
+    const shuffled = [...pool].sort(() => Math.random() - 0.5)
+    return shuffled.slice(0, 3)
+  }, [t])
 
   // Scroll to the latest message automatically
   useEffect(() => {
