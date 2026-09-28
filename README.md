@@ -8,7 +8,7 @@ Set these environment variables in Vercel:
 
 ```bash
 GROQ_API_KEY=your_groq_api_key_here
-GROQ_MODEL=llama-3.3-70b-versatile
+GROQ_MODEL=openai/gpt-oss-120b
 CASEMIND_ADMIN_EMAIL=admin@casemind.ai
 CASEMIND_ADMIN_PASSWORD=admin123
 ```
