@@ -42,7 +42,7 @@ def load_local_env():
 load_local_env()
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 ADMIN_EMAIL = os.getenv("CASEMIND_ADMIN_EMAIL", "admin@casemind.ai")
 ADMIN_PASSWORD = os.getenv("CASEMIND_ADMIN_PASSWORD", "admin123")
 

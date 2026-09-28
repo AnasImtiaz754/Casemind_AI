@@ -1,5 +1,5 @@
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
-const DEFAULT_CHAT_MODEL = process.env.GROQ_MODEL?.trim() || "llama-3.3-70b-versatile"
+const DEFAULT_CHAT_MODEL = process.env.GROQ_MODEL?.trim() || "openai/gpt-oss-120b"
 
 function fallbackAnswer(question = "") {
   const text = String(question || "").toLowerCase()
