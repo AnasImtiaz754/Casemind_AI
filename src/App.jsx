@@ -16,7 +16,7 @@ function applyTheme(theme) {
 
 // How long to wait before giving up on a request (12 seconds)
 const REQUEST_TIMEOUT = 12000
-const API_URL = import.meta.env.VITE_API_BASE_URL?.trim() || "/api"
+const API_URL = import.meta.env.PROD ? "/api" : (import.meta.env.VITE_API_BASE_URL?.trim() || "/api")
 const PROFILE_STORAGE_PREFIX = "casemind_profile:"
 const LANG_STORAGE_KEY = "casemind_language"
 const THEME_STORAGE_KEY = "casemind_theme"
@@ -1044,8 +1044,9 @@ function ChooseRolePage({ onChoose, onBack, t }) {
 // ─── USER SIGNUP PAGE ─────────────────────────────────────────
 function getUserErrors(form) {
   const errors = {}
-  if (!isValidName(form.full_name)) errors.full_name = "Name must be at least 3 letters."
-  if (!isValidEmail(form.email)) errors.email = "Enter a valid email address."
+  if (!isValidName(form.full_name) || form.full_name.trim().length > 60) errors.full_name = "Use 3-60 letters, spaces, apostrophes, periods, or hyphens."
+  if (!isValidEmail(form.email) || form.email.trim().length > 254) errors.email = "Enter a valid email address under 255 characters."
+  if (form.password.length > 128) errors.password = "Password must be 128 characters or fewer."
   if (!isStrongPassword(form.password)) errors.password = "Password must be at least 8 characters and include a letter and a number."
   if (form.password !== form.confirm) errors.confirm = "Passwords do not match."
   return errors

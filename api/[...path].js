@@ -204,7 +204,7 @@ export default async function handler(req, res) {
   if (!backendBase) {
     res.status(500).json({
       success: false,
-      message: "BACKEND_URL is not configured on Vercel.",
+      message: "Account service is not configured. Set BACKEND_URL in Vercel to the deployed backend URL, then redeploy.",
     })
     return
   }

@@ -149,7 +149,8 @@ def hash_password(password):
 
 
 def valid_email(value):
-    return re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", value or "") is not None
+    value = (value or "").strip()
+    return len(value) <= 254 and re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", value) is not None
 
 
 def valid_phone(value):
@@ -158,7 +159,8 @@ def valid_phone(value):
 
 
 def valid_name(value):
-    return re.match(r"^[A-Za-z .'-]{3,}$", (value or "").strip()) is not None
+    value = (value or "").strip()
+    return 3 <= len(value) <= 60 and re.match(r"^[A-Za-z .'-]+$", value) is not None
 
 
 def valid_city(value):
@@ -188,7 +190,7 @@ def normalize_cnic(value):
 def valid_password(value):
     value = value or ""
     return (
-        len(value) >= 8
+        8 <= len(value) <= 128
         and re.search(r"[A-Za-z]", value) is not None
         and re.search(r"\d", value) is not None
     )
