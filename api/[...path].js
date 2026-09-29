@@ -192,7 +192,12 @@ async function handleAsk(req, res) {
 }
 
 export default async function handler(req, res) {
-  const backendBase = (process.env.BACKEND_URL || process.env.VITE_API_BASE_URL || "").trim()
+  const configuredBackend = (process.env.BACKEND_URL || process.env.VITE_API_BASE_URL || "").trim()
+  const backendBase = configuredBackend && /^https?:\/\//i.test(configuredBackend)
+    ? configuredBackend
+    : configuredBackend
+      ? `https://${configuredBackend}`
+      : ""
   const incomingUrl = new URL(req.url, "http://localhost")
   const targetPath = incomingUrl.pathname.replace(/^\/api/, "") || "/"
 
