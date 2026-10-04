@@ -313,7 +313,9 @@ async function apiRequest(path, options = {}) {
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT)
 
   try {
-    const url = `${API_URL}${path}`
+    // Account data uses Railway directly; chatbot requests use Vercel's
+    // provider fallback so OpenAI/Groq keys stay server-side.
+    const url = path === "/ask" ? "/api/ask" : `${API_URL}${path}`
     const res = await fetch(url, {
       ...options,
       signal: controller.signal,
