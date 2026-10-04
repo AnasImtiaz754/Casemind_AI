@@ -155,7 +155,7 @@ def valid_phone(value):
 
 def valid_name(value):
     value = (value or "").strip()
-    return 3 <= len(value) <= 60 and re.match(r"^[A-Za-z .'-]+$", value) is not None
+    return 2 <= len(value) <= 100 and re.match(r"^[A-Za-z .'-]+$", value) is not None
 
 
 def valid_city(value):
@@ -163,7 +163,18 @@ def valid_city(value):
 
 
 def valid_dba(value):
-    return re.match(r"^[A-Za-z0-9/-]{4,15}$", (value or "").strip()) is not None
+    return re.match(r"^[A-Za-z0-9/-]{4,20}$", (value or "").strip()) is not None
+
+
+def valid_password(value):
+    value = value or ""
+    return (
+        8 <= len(value) <= 128
+        and re.search(r"[A-Z]", value) is not None
+        and re.search(r"[a-z]", value) is not None
+        and re.search(r"\d", value) is not None
+        and re.search(r"[^A-Za-z0-9]", value) is not None
+    )
 
 
 def valid_specializations(value):
@@ -197,11 +208,11 @@ def validation_error(message):
 
 def validate_common(name, email, password):
     if not valid_name(name):
-        return "Name should contain letters only and be at least 3 characters."
+        return "Name must be 2-100 characters using letters, spaces, apostrophes, periods, or hyphens."
     if not valid_email(email):
         return "Enter a valid email address."
     if not valid_password(password):
-        return "Password must be at least 8 characters and include a letter and a number."
+        return "Password must be 8-128 characters and include uppercase, lowercase, a number, and a special character."
     return None
 
 
@@ -272,8 +283,9 @@ class LawyerSignup(BaseModel):
 
 
 class LoginData(BaseModel):
-    email: str
+    email: str = ""
     password: str
+    dba_number: str = ""
 
 
 class GoogleAuthData(BaseModel):
@@ -369,7 +381,7 @@ def signup_lawyer(data: LawyerSignup):
     if error:
         return validation_error(error)
     if not valid_dba(data.dba_number):
-        return validation_error("DBA number must be 4-15 letters/numbers with optional hyphens or slashes.")
+        return validation_error("DBA number must be 4-20 letters/numbers with optional hyphens or slashes.")
     if data.bar_council not in BAR_COUNCILS:
         return validation_error("Select a valid issuing Bar Council.")
     if not valid_cnic(data.cnic_number):
@@ -414,7 +426,9 @@ def signup_lawyer(data: LawyerSignup):
 
 @app.post("/login")
 def login(data: LoginData):
-    if data.email.strip().lower() == ADMIN_EMAIL.lower() and data.password == ADMIN_PASSWORD:
+    identifier = data.email.strip().lower()
+    dba_identifier = data.dba_number.strip().upper()
+    if identifier == ADMIN_EMAIL.lower() and data.password == ADMIN_PASSWORD:
         return {"success": True, "role": "admin", "name": "Admin"}
 
     conn = get_connection()
@@ -422,7 +436,7 @@ def login(data: LoginData):
 
     cursor.execute(
         "SELECT id, full_name, email, phone, city, auth_provider, login_count, last_login FROM users WHERE email=? AND password=?",
-        (data.email.strip().lower(), hash_password(data.password)),
+        (identifier, hash_password(data.password)),
     )
     user = cursor.fetchone()
     if user:
@@ -453,9 +467,9 @@ def login(data: LoginData):
         """
         SELECT id, lawyer_name, email, phone, city, bar_council, dba_number, cnic_number, specialization, verification_status
         FROM lawyers
-        WHERE email=? AND password=?
+        WHERE (LOWER(email)=? OR UPPER(dba_number)=?) AND password=?
         """,
-        (data.email.strip().lower(), hash_password(data.password)),
+        (identifier, dba_identifier or identifier.upper(), hash_password(data.password)),
     )
     lawyer = cursor.fetchone()
     if lawyer:
