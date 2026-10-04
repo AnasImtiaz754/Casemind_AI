@@ -1,9 +1,22 @@
+# Frontend build and dependencies
 node_modules/
 dist/
+
+# Environment files and secrets
 .env
 .env.*
 !.env.example
 backend/.env
-backend/casemind.db
+backend/.env.*
+!backend/.env.example
+
+# Python cache and local database
 __pycache__/
 *.pyc
+backend/casemind.db
+
+# Logs and editor files
+*.log
+.vscode/
+.idea/
+.DS_Store

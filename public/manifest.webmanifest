@@ -1,0 +1,22 @@
+{
+  "name": "CaseMind AI",
+  "short_name": "CaseMind",
+  "description": "Pakistani legal assistance with chat, lawyer directory, and admin tools.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f6f8fb",
+  "theme_color": "#17324d",
+  "icons": [
+    {
+      "src": "/paklaw-logo-embedded.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/paklaw-logo-embedded.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

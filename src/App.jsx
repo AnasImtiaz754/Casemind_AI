@@ -16,7 +16,9 @@ function applyTheme(theme) {
 
 // How long to wait before giving up on a request (12 seconds)
 const REQUEST_TIMEOUT = 12000
-const API_URL = import.meta.env.VITE_API_BASE_URL?.trim() || "/api"
+const API_URL = import.meta.env.PROD
+  ? (import.meta.env.VITE_API_BASE_URL?.trim() || "https://casemindai-production.up.railway.app")
+  : (import.meta.env.VITE_API_BASE_URL?.trim() || "/api")
 const PROFILE_STORAGE_PREFIX = "casemind_profile:"
 const LANG_STORAGE_KEY = "casemind_language"
 const THEME_STORAGE_KEY = "casemind_theme"
