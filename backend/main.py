@@ -132,6 +132,20 @@ def init_db():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS lawyer_reviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lawyer_id INTEGER NOT NULL,
+            reviewer_email TEXT NOT NULL,
+            rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+            comment TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(lawyer_id, reviewer_email),
+            FOREIGN KEY(lawyer_id) REFERENCES lawyers(id) ON DELETE CASCADE
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -310,6 +324,12 @@ class Question(BaseModel):
 
 class StatusUpdate(BaseModel):
     status: str
+
+
+class LawyerReview(BaseModel):
+    reviewer_email: str
+    rating: int
+    comment: str
 
 
 def fallback_answer(question: str) -> str:
@@ -669,8 +689,53 @@ def get_lawyers():
         ORDER BY lawyer_name
     """)
     rows = cursor.fetchall()
+    lawyers = []
+    for row in rows:
+        lawyer = lawyer_dict(row)
+        cursor.execute("SELECT ROUND(AVG(rating), 1) AS average, COUNT(*) AS count FROM lawyer_reviews WHERE lawyer_id=? AND status='approved'", (row["id"],))
+        review = cursor.fetchone()
+        lawyer.update({"average_rating": review["average"] or 0, "review_count": review["count"]})
+        lawyers.append(lawyer)
     conn.close()
-    return {"lawyers": [lawyer_dict(row) for row in rows]}
+    return {"lawyers": lawyers}
+
+
+@app.post("/lawyers/{lawyer_id}/reviews")
+def create_review(lawyer_id: int, data: LawyerReview):
+    email = data.reviewer_email.strip().lower()
+    if not valid_email(email) or not (1 <= data.rating <= 5):
+        return validation_error("Provide a valid email and a rating from 1 to 5.")
+    comment = data.comment.strip()
+    if not 10 <= len(comment) <= 1000:
+        return validation_error("Review must contain 10-1000 characters.")
+    conn = get_connection()
+    try:
+        conn.execute("INSERT INTO lawyer_reviews (lawyer_id, reviewer_email, rating, comment) VALUES (?, ?, ?, ?)", (lawyer_id, email, data.rating, comment))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.close()
+        return validation_error("You have already submitted a review for this lawyer.")
+    conn.close()
+    return {"success": True, "message": "Review submitted for admin approval."}
+
+
+@app.get("/admin/reviews")
+def admin_reviews():
+    conn = get_connection()
+    rows = conn.execute("SELECT r.*, l.lawyer_name FROM lawyer_reviews r JOIN lawyers l ON l.id=r.lawyer_id ORDER BY r.created_at DESC").fetchall()
+    conn.close()
+    return {"reviews": [dict(row) for row in rows]}
+
+
+@app.patch("/admin/reviews/{review_id}/status")
+def update_review_status(review_id: int, data: StatusUpdate):
+    if data.status not in {"approved", "rejected", "pending"}:
+        return validation_error("Invalid review status.")
+    conn = get_connection()
+    result = conn.execute("UPDATE lawyer_reviews SET status=? WHERE id=?", (data.status, review_id))
+    conn.commit()
+    conn.close()
+    return {"success": bool(result.rowcount), "message": "Review status updated."}
 
 
 @app.get("/admin/summary")

@@ -1385,7 +1385,7 @@ function ProfileCard({ user, t, onSaveProfile }) {
 }
 
 // ─── CHAT PAGE ────────────────────────────────────────────────
-function ChatPage({ user, t }) {
+function ChatPage({ user, t, lang }) {
   const archiveKey = user?.email ? `${CHAT_ARCHIVE_PREFIX}${user.email}` : `${CHAT_ARCHIVE_PREFIX}guest`
   const initialMessages = [
     {
@@ -1408,6 +1408,7 @@ function ChatPage({ user, t }) {
   const [currentChatId, setCurrentChatId] = useState(null)
   const [inputText, setInputText] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+  const [isListening, setIsListening] = useState(false)
   const bottomRef = useRef(null)
   const quickPrompts = useMemo(() => {
     const pool = [
@@ -1516,6 +1517,32 @@ function ChatPage({ user, t }) {
     setShowHistory(false)
   }
 
+  function toggleVoiceInput() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    if (!SpeechRecognition) {
+      setMessages((current) => [...current, { role: "bot", text: "Voice input is not supported by this browser." }])
+      return
+    }
+    if (isListening) return
+    const recognition = new SpeechRecognition()
+    recognition.lang = lang === "ur" ? "ur-PK" : "en-PK"
+    recognition.interimResults = false
+    recognition.onstart = () => setIsListening(true)
+    recognition.onend = () => setIsListening(false)
+    recognition.onerror = () => setIsListening(false)
+    recognition.onresult = (event) => setInputText((current) => `${current} ${event.results[0][0].transcript}`.trim())
+    recognition.start()
+  }
+
+  function speakLatestAnswer() {
+    const latest = [...messages].reverse().find((message) => message.role === "bot")
+    if (!latest || !window.speechSynthesis) return
+    window.speechSynthesis.cancel()
+    const utterance = new SpeechSynthesisUtterance(latest.text)
+    utterance.lang = lang === "ur" ? "ur-PK" : "en-PK"
+    window.speechSynthesis.speak(utterance)
+  }
+
   return (
     <main className="chat-page">
       {/* Show a warning if lawyer is not yet approved */}
@@ -1580,6 +1607,9 @@ function ChatPage({ user, t }) {
 
         {/* Input bar at the bottom */}
         <div className="chat-input-bar">
+          <button type="button" className="ghost-btn" onClick={toggleVoiceInput} title="Voice input" aria-label="Voice input">
+            {isListening ? "Listening..." : "Mic"}
+          </button>
           <input
             type="text"
             className="chat-input"
@@ -1597,6 +1627,9 @@ function ChatPage({ user, t }) {
             disabled={isLoading || !inputText.trim()}
           >
             {isLoading ? "..." : t.send}
+          </button>
+          <button type="button" className="ghost-btn" onClick={speakLatestAnswer} title="Read latest answer aloud" aria-label="Read latest answer aloud">
+            Read aloud
           </button>
         </div>
 
@@ -2078,7 +2111,7 @@ export default function App() {
         lang={lang}
       />
       {currentPage === "admin" && user?.role === "admin" && <AdminDashboard t={t} />}
-      {currentPage === "chat" && <ChatPage user={user} t={t} />}
+      {currentPage === "chat" && <ChatPage user={user} t={t} lang={lang} />}
       {currentPage === "lawyers" && <LawyersPage t={t} />}
     </div>
   )
