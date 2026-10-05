@@ -685,7 +685,7 @@ def get_lawyers():
     cursor.execute("""
         SELECT id, lawyer_name, email, phone, city, bar_council, dba_number, cnic_number, specialization, verification_status
         FROM lawyers
-        WHERE verification_status='approved'
+        WHERE LOWER(TRIM(COALESCE(verification_status, '')))='approved'
         ORDER BY lawyer_name
     """)
     rows = cursor.fetchall()
@@ -803,14 +803,15 @@ def delete_user(user_id: int):
 
 @app.patch("/admin/lawyers/{lawyer_id}/status")
 def update_lawyer_status(lawyer_id: int, data: StatusUpdate):
-    if data.status not in {"pending", "approved", "rejected"}:
+    normalized_status = data.status.strip().lower()
+    if normalized_status not in {"pending", "approved", "rejected"}:
         return validation_error("Invalid status.")
 
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
         "UPDATE lawyers SET verification_status=? WHERE id=?",
-        (data.status, lawyer_id),
+        (normalized_status, lawyer_id),
     )
     conn.commit()
     changed = cursor.rowcount
@@ -818,7 +819,7 @@ def update_lawyer_status(lawyer_id: int, data: StatusUpdate):
 
     if not changed:
         return validation_error("Lawyer not found.")
-    return {"success": True, "message": f"Lawyer status updated to {data.status}."}
+    return {"success": True, "message": f"Lawyer status updated to {normalized_status}."}
 
 
 @app.post("/ask")
