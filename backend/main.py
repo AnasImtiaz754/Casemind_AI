@@ -177,7 +177,7 @@ def valid_city(value):
 
 
 def valid_dba(value):
-    return re.match(r"^[A-Za-z0-9/-]{4,20}$", (value or "").strip()) is not None
+    return re.match(r"^DBA-[A-Za-z]{2,5}-\d{1,12}$", (value or "").strip(), re.IGNORECASE) is not None
 
 
 def valid_password(value):
@@ -401,7 +401,7 @@ def signup_lawyer(data: LawyerSignup):
     if error:
         return validation_error(error)
     if not valid_dba(data.dba_number):
-        return validation_error("DBA number must be 4-20 letters/numbers with optional hyphens or slashes.")
+        return validation_error("Use DBA-City-Number, for example DBA-Lhr-983223.")
     if data.bar_council not in BAR_COUNCILS:
         return validation_error("Select a valid issuing Bar Council.")
     if not valid_cnic(data.cnic_number):
@@ -416,6 +416,10 @@ def signup_lawyer(data: LawyerSignup):
         if account_exists(cursor, email):
             conn.close()
             return validation_error("Email already exists.")
+        cursor.execute("SELECT 1 FROM lawyers WHERE UPPER(dba_number)=?", (data.dba_number.strip().upper(),))
+        if cursor.fetchone():
+            conn.close()
+            return validation_error("This DBA number is already registered.")
         cursor.execute("""
             INSERT INTO lawyers (
                 lawyer_name, email, phone, city, bar_council, dba_number, cnic_number, specialization, password, verification_status

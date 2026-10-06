@@ -16,9 +16,9 @@ function applyTheme(theme) {
 
 // How long to wait before giving up on a request (12 seconds)
 const REQUEST_TIMEOUT = 12000
-const API_URL = import.meta.env.PROD
-  ? (import.meta.env.VITE_API_BASE_URL?.trim() || "https://casemindai-production.up.railway.app")
-  : (import.meta.env.VITE_API_BASE_URL?.trim() || "/api")
+// Route production requests through the same-origin API gateway. This keeps
+// account updates and directory reads on one configured backend.
+const API_URL = import.meta.env.VITE_API_BASE_URL?.trim() || "/api"
 const PROFILE_STORAGE_PREFIX = "casemind_profile:"
 const LANG_STORAGE_KEY = "casemind_language"
 const THEME_STORAGE_KEY = "casemind_theme"
@@ -319,6 +319,7 @@ async function apiRequest(path, options = {}) {
     const res = await fetch(url, {
       ...options,
       signal: controller.signal,
+      cache: "no-store",
     })
     const data = await res.json()
     if (res.ok && !(data && data.success === false && /backend/i.test(data.message || ""))) {
@@ -495,6 +496,10 @@ async function fallbackApiRequest(path, options = {}, upstreamData = null) {
     const email = (body.email || "").trim().toLowerCase()
     const exists = state.users.some((entry) => entry.email === email) || state.lawyers.some((entry) => entry.email === email)
     if (exists) return { success: false, message: "Email already exists." }
+    if (!isValidDba(body.dba_number)) return { success: false, message: "Use DBA-City-Number, for example DBA-Lhr-983223." }
+    if (state.lawyers.some((entry) => String(entry.dba_number || "").toLowerCase() === String(body.dba_number || "").trim().toLowerCase())) {
+      return { success: false, message: "This DBA number is already registered." }
+    }
 
     state.lawyers.push({
       lawyer_name: body.lawyer_name,
@@ -753,7 +758,7 @@ function isValidCity(val) {
 }
 
 function isValidDba(val) {
-  return /^[A-Za-z0-9/-]{3,24}$/.test(val.trim())
+  return /^DBA-[A-Za-z]{2,5}-\d{1,12}$/.test(String(val || "").trim())
 }
 
 function normalizeCnic(val) {
@@ -1136,7 +1141,7 @@ function getLawyerErrors(form) {
   if (!isValidPhone(form.phone)) errors.phone = "Enter a valid Pakistani mobile number."
   if (!PAKISTAN_CITIES.includes(form.city)) errors.city = "Select a valid Pakistani city from the list."
   if (!BAR_COUNCILS.includes(form.bar_council)) errors.bar_council = "Select the issuing Bar Council."
-  if (!/^[A-Za-z0-9/-]{4,15}$/.test((form.dba_number || "").trim())) errors.dba_number = "Use 4-15 letters/numbers with optional hyphens or slashes."
+  if (!isValidDba(form.dba_number)) errors.dba_number = "Use DBA-City-Number, for example DBA-Lhr-983223."
   if (!isValidCnic(form.cnic_number)) errors.cnic_number = "CNIC must be 13 digits, e.g. 35202-1234567-1."
   if (!Array.isArray(form.specialization) || form.specialization.length < 1 || form.specialization.length > 8) errors.specialization = "Select 1 to 8 practice areas."
   if (!isStrongPassword(form.password)) errors.password = "Password must be at least 8 characters and include a letter and a number."
@@ -1215,7 +1220,7 @@ function LawyerSignupPage({ onSuccess, onBack, t, authMethod = "email" }) {
         <TextInput label={t.phoneLabel} value={form.phone} onChange={updateField("phone")} error={errors.phone} placeholder="03001234567" inputMode="tel" maxLength={13} />
         <label className="field-label">{t.cityLabel}<select value={form.city} onChange={updateField("city")} aria-invalid={Boolean(errors.city)}><option value="">Select city</option>{PAKISTAN_CITIES.map((city) => <option key={city} value={city}>{city}</option>)}</select>{errors.city && <span className="field-error">{errors.city}</span>}</label>
         <label className="field-label">Issuing Bar Council<select value={form.bar_council} onChange={updateField("bar_council")} aria-invalid={Boolean(errors.bar_council)}><option value="">Select Bar Council</option>{BAR_COUNCILS.map((council) => <option key={council} value={council}>{council}</option>)}</select>{errors.bar_council && <span className="field-error">{errors.bar_council}</span>}</label>
-        <TextInput label={t.dbaLabel} value={form.dba_number} onChange={updateField("dba_number")} error={errors.dba_number} placeholder="PBC-1234 or 123-G/2018" maxLength={15} />
+        <TextInput label={t.dbaLabel} value={form.dba_number} onChange={updateField("dba_number")} error={errors.dba_number} placeholder="DBA-Lhr-983223" maxLength={22} />
         <TextInput label={t.cnicLabel} value={form.cnic_number} onChange={updateField("cnic_number")} error={errors.cnic_number} placeholder="35202-1234567-1" inputMode="numeric" maxLength={15} />
         <label className="field-label">{t.specializationLabel} <span className="field-hint">Select up to 8 areas</span><select multiple size={5} value={form.specialization} onChange={updateField("specialization")} aria-invalid={Boolean(errors.specialization)}>{PRACTICE_AREAS.map((area) => <option key={area} value={area}>{area}</option>)}</select>{errors.specialization && <span className="field-error">{errors.specialization}</span>}</label>
         <TextInput label={t.passwordLabel} type="password" value={form.password} onChange={updateField("password")} error={errors.password} minLength={8} autoComplete="new-password" />
@@ -1410,6 +1415,7 @@ function ChatPage({ user, t, lang }) {
   const [isLoading, setIsLoading] = useState(false)
   const [isListening, setIsListening] = useState(false)
   const bottomRef = useRef(null)
+  const recognitionRef = useRef(null)
   const quickPrompts = useMemo(() => {
     const pool = [
       t.quickPromptProperty,
@@ -1523,13 +1529,27 @@ function ChatPage({ user, t, lang }) {
       setMessages((current) => [...current, { role: "bot", text: "Voice input is not supported by this browser." }])
       return
     }
-    if (isListening) return
+    if (isListening) {
+      recognitionRef.current?.stop()
+      return
+    }
     const recognition = new SpeechRecognition()
+    recognitionRef.current = recognition
     recognition.lang = lang === "ur" ? "ur-PK" : "en-PK"
     recognition.interimResults = false
+    recognition.continuous = false
     recognition.onstart = () => setIsListening(true)
-    recognition.onend = () => setIsListening(false)
-    recognition.onerror = () => setIsListening(false)
+    recognition.onend = () => {
+      recognitionRef.current = null
+      setIsListening(false)
+    }
+    recognition.onerror = (event) => {
+      const message = event.error === "not-allowed" || event.error === "service-not-allowed"
+        ? "Microphone access was blocked. Allow microphone permission in your browser settings and try again."
+        : "Voice input could not start. Please try again."
+      setMessages((current) => [...current, { role: "bot", text: message }])
+      setIsListening(false)
+    }
     recognition.onresult = (event) => setInputText((current) => `${current} ${event.results[0][0].transcript}`.trim())
     recognition.start()
   }
@@ -1607,8 +1627,9 @@ function ChatPage({ user, t, lang }) {
 
         {/* Input bar at the bottom */}
         <div className="chat-input-bar">
-          <button type="button" className="ghost-btn" onClick={toggleVoiceInput} title="Voice input" aria-label="Voice input">
-            {isListening ? "Listening..." : "Mic"}
+          <button type="button" className={`ghost-btn mic-btn${isListening ? " listening" : ""}`} onClick={toggleVoiceInput} title={isListening ? "Listening" : "Start voice input"} aria-label={isListening ? "Listening" : "Start voice input"} aria-pressed={isListening}>
+            <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false"><path d="M12 14.5a3.5 3.5 0 0 0 3.5-3.5V6a3.5 3.5 0 0 0-7 0v5a3.5 3.5 0 0 0 3.5 3.5Zm6-3.5a1 1 0 1 0-2 0 4 4 0 0 1-8 0 1 1 0 1 0-2 0 6 6 0 0 0 5 5.91V20H8a1 1 0 1 0 0 2h8a1 1 0 1 0 0-2h-3v-3.09A6 6 0 0 0 18 11Z" /></svg>
+            <span className="sr-only">{isListening ? "Listening" : "Voice input"}</span>
           </button>
           <input
             type="text"
@@ -1798,11 +1819,15 @@ function AdminDashboard({ t }) {
   async function handleStatusChange(lawyerId, newStatus) {
     setStatusMessage("")
     try {
-      await apiRequest(`/admin/lawyers/${lawyerId}/status`, {
+      const result = await apiRequest(`/admin/lawyers/${lawyerId}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: newStatus }),
       })
+      if (result?.success === false) throw new Error(result.message || "Unable to update this lawyer.")
+      setLawyers((current) => current.map((lawyer) => (
+        lawyer.id === lawyerId ? { ...lawyer, verification_status: newStatus } : lawyer
+      )))
       await loadData()
       setStatusMessage(`Lawyer has been ${newStatus}.`)
     } catch (err) {
