@@ -16,9 +16,12 @@ function applyTheme(theme) {
 
 // How long to wait before giving up on a request (12 seconds)
 const REQUEST_TIMEOUT = 12000
-// Route production requests through the same-origin API gateway. This keeps
-// account updates and directory reads on one configured backend.
-const API_URL = import.meta.env.VITE_API_BASE_URL?.trim() || "/api"
+// Production must use the same-origin Vercel gateway. A browser-exposed
+// VITE_API_BASE_URL can otherwise contain a stale or local-only address and
+// prevent the login request from reaching the deployed account service.
+const API_URL = import.meta.env.PROD
+  ? "/api"
+  : (import.meta.env.VITE_API_BASE_URL?.trim() || "/api")
 const PROFILE_STORAGE_PREFIX = "casemind_profile:"
 const LANG_STORAGE_KEY = "casemind_language"
 const THEME_STORAGE_KEY = "casemind_theme"
