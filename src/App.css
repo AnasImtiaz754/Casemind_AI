@@ -264,6 +264,49 @@ input:focus, select:focus, textarea:focus {
   appearance: auto;
 }
 
+.specialization-picker {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.specialization-picker legend {
+  padding: 0;
+  margin-bottom: 8px;
+  color: var(--navy);
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.specialization-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.specialization-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.specialization-option input { accent-color: var(--green); }
+
+.specialization-option.selected {
+  border-color: var(--green);
+  background: color-mix(in srgb, var(--green) 14%, var(--surface));
+  color: var(--green);
+}
+
 .field-hint {
   color: var(--muted);
   font-size: 11px;

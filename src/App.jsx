@@ -1157,11 +1157,22 @@ function LawyerSignupPage({ onSuccess, onBack, t, authMethod = "email" }) {
 
   function updateField(field) {
     return function (e) {
-      const value = field === "specialization"
-        ? Array.from(e.target.selectedOptions, (option) => option.value)
-        : e.target.value
+      const value = e.target.value
       setForm({ ...form, [field]: value })
     }
+  }
+
+  function toggleSpecialization(area) {
+    setForm((current) => {
+      const selected = current.specialization || []
+      if (selected.includes(area)) return { ...current, specialization: selected.filter((item) => item !== area) }
+      if (selected.length >= 8) {
+        setErrors((currentErrors) => ({ ...currentErrors, specialization: "Select up to 8 practice areas." }))
+        return current
+      }
+      setErrors((currentErrors) => ({ ...currentErrors, specialization: "" }))
+      return { ...current, specialization: [...selected, area] }
+    })
   }
 
   async function handleSubmit(e) {
@@ -1222,7 +1233,18 @@ function LawyerSignupPage({ onSuccess, onBack, t, authMethod = "email" }) {
         <label className="field-label">Issuing Bar Council<select value={form.bar_council} onChange={updateField("bar_council")} aria-invalid={Boolean(errors.bar_council)}><option value="">Select Bar Council</option>{BAR_COUNCILS.map((council) => <option key={council} value={council}>{council}</option>)}</select>{errors.bar_council && <span className="field-error">{errors.bar_council}</span>}</label>
         <TextInput label={t.dbaLabel} value={form.dba_number} onChange={updateField("dba_number")} error={errors.dba_number} placeholder="DBA-Lhr-983223" maxLength={22} />
         <TextInput label={t.cnicLabel} value={form.cnic_number} onChange={updateField("cnic_number")} error={errors.cnic_number} placeholder="35202-1234567-1" inputMode="numeric" maxLength={15} />
-        <label className="field-label">{t.specializationLabel} <span className="field-hint">Select up to 8 areas</span><select multiple size={5} value={form.specialization} onChange={updateField("specialization")} aria-invalid={Boolean(errors.specialization)}>{PRACTICE_AREAS.map((area) => <option key={area} value={area}>{area}</option>)}</select>{errors.specialization && <span className="field-error">{errors.specialization}</span>}</label>
+        <fieldset className="specialization-picker" aria-invalid={Boolean(errors.specialization)}>
+          <legend>{t.specializationLabel} <span className="field-hint">Choose up to 8 areas ({form.specialization.length}/8)</span></legend>
+          <div className="specialization-options">
+            {PRACTICE_AREAS.map((area) => (
+              <label key={area} className={form.specialization.includes(area) ? "specialization-option selected" : "specialization-option"}>
+                <input type="checkbox" checked={form.specialization.includes(area)} onChange={() => toggleSpecialization(area)} />
+                <span>{area}</span>
+              </label>
+            ))}
+          </div>
+          {errors.specialization && <span className="field-error">{errors.specialization}</span>}
+        </fieldset>
         <TextInput label={t.passwordLabel} type="password" value={form.password} onChange={updateField("password")} error={errors.password} minLength={8} autoComplete="new-password" />
         <TextInput label={`Confirm ${t.passwordLabel}`} type="password" value={form.confirm} onChange={updateField("confirm")} error={errors.confirm} minLength={8} autoComplete="new-password" />
         {serverMessage && <p className="form-error">{serverMessage}</p>}
