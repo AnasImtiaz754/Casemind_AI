@@ -192,7 +192,10 @@ async function handleAsk(req, res) {
 }
 
 export default async function handler(req, res) {
-  const configuredBackend = (process.env.BACKEND_URL || process.env.VITE_API_BASE_URL || "https://casemindai-production.up.railway.app").trim()
+  // VITE_* values are exposed to the browser and may contain a local
+  // development URL. The production proxy must only use its server-side
+  // backend setting or the deployed Railway fallback.
+  const configuredBackend = (process.env.BACKEND_URL || "https://casemindai-production.up.railway.app").trim()
   const backendBase = configuredBackend && /^https?:\/\//i.test(configuredBackend)
     ? configuredBackend
     : configuredBackend
