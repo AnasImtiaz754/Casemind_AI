@@ -146,6 +146,17 @@ def init_db():
         )
     """)
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS lawyer_notifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            lawyer_id INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            message TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(lawyer_id) REFERENCES lawyers(id) ON DELETE CASCADE
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -704,6 +715,29 @@ def get_lawyers():
     return {"lawyers": lawyers}
 
 
+@app.get("/lawyers/status")
+def lawyer_status(email: str):
+    normalized_email = (email or "").strip().lower()
+    if not valid_email(normalized_email):
+        return validation_error("Enter a valid lawyer email address.")
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, verification_status FROM lawyers WHERE email=?", (normalized_email,))
+    lawyer = cursor.fetchone()
+    if not lawyer:
+        conn.close()
+        return validation_error("Lawyer account not found.")
+
+    cursor.execute(
+        "SELECT status, message, created_at FROM lawyer_notifications WHERE lawyer_id=? ORDER BY created_at DESC, id DESC LIMIT 5",
+        (lawyer["id"],),
+    )
+    notifications = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    return {"success": True, "verification_status": lawyer["verification_status"], "notifications": notifications}
+
+
 @app.post("/lawyers/{lawyer_id}/reviews")
 def create_review(lawyer_id: int, data: LawyerReview):
     email = data.reviewer_email.strip().lower()
@@ -813,10 +847,27 @@ def update_lawyer_status(lawyer_id: int, data: StatusUpdate):
 
     conn = get_connection()
     cursor = conn.cursor()
+    cursor.execute("SELECT lawyer_name, verification_status FROM lawyers WHERE id=?", (lawyer_id,))
+    lawyer = cursor.fetchone()
+    if not lawyer:
+        conn.close()
+        return validation_error("Lawyer not found.")
+
     cursor.execute(
         "UPDATE lawyers SET verification_status=? WHERE id=?",
         (normalized_status, lawyer_id),
     )
+    if lawyer["verification_status"] != normalized_status:
+        if normalized_status == "approved":
+            message = "Your lawyer profile has been approved and is now visible in the public directory."
+        elif normalized_status == "rejected":
+            message = "Your lawyer profile request was not approved. Contact admin_casemind@gmail.com if you need help or want to submit corrected details."
+        else:
+            message = "Your lawyer profile is pending admin review."
+        cursor.execute(
+            "INSERT INTO lawyer_notifications (lawyer_id, status, message) VALUES (?, ?, ?)",
+            (lawyer_id, normalized_status, message),
+        )
     conn.commit()
     changed = cursor.rowcount
     conn.close()

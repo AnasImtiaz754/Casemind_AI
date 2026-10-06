@@ -1414,6 +1414,8 @@ function ChatPage({ user, t, lang }) {
   const [inputText, setInputText] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [isListening, setIsListening] = useState(false)
+  const [lawyerStatus, setLawyerStatus] = useState(user?.verification_status || "")
+  const [lawyerNotification, setLawyerNotification] = useState("")
   const bottomRef = useRef(null)
   const recognitionRef = useRef(null)
   const quickPrompts = useMemo(() => {
@@ -1447,6 +1449,27 @@ function ChatPage({ user, t, lang }) {
       setArchivedChats([])
     }
   }, [archiveKey, t.welcomeBot])
+
+  useEffect(() => {
+    if (user?.role !== "lawyer" || !user?.email) return undefined
+
+    let active = true
+    const refreshLawyerStatus = async () => {
+      const data = await apiRequest(`/lawyers/status?email=${encodeURIComponent(user.email)}`)
+      if (!active || data?.success === false) return
+      setLawyerStatus(data.verification_status || "pending")
+      if (Array.isArray(data.notifications) && data.notifications[0]?.message) {
+        setLawyerNotification(data.notifications[0].message)
+      }
+    }
+
+    refreshLawyerStatus()
+    window.addEventListener("focus", refreshLawyerStatus)
+    return () => {
+      active = false
+      window.removeEventListener("focus", refreshLawyerStatus)
+    }
+  }, [user?.email, user?.role])
 
   function saveArchive(nextMessages) {
     const hasUserMessage = nextMessages.some((msg) => msg.role === "user")
@@ -1566,9 +1589,19 @@ function ChatPage({ user, t, lang }) {
   return (
     <main className="chat-page">
       {/* Show a warning if lawyer is not yet approved */}
-      {user?.verification_status === "pending" && (
+      {user?.role === "lawyer" && lawyerStatus === "pending" && (
         <p className="pending-notice">
           Your lawyer profile is under admin review. You will appear in the public directory once approved.
+        </p>
+      )}
+      {user?.role === "lawyer" && lawyerStatus === "approved" && (
+        <p className="approved-notice">
+          {lawyerNotification || "Your lawyer profile has been approved and is now visible in the public directory."}
+        </p>
+      )}
+      {user?.role === "lawyer" && lawyerStatus === "rejected" && (
+        <p className="rejected-notice">
+          {lawyerNotification || "Your lawyer profile request was not approved."} Contact <a href="mailto:admin_casemind@gmail.com">admin_casemind@gmail.com</a> for help.
         </p>
       )}
 

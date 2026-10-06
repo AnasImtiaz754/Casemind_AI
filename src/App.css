@@ -723,6 +723,31 @@ input:focus, select:focus, textarea:focus {
   margin-bottom: 16px;
 }
 
+.approved-notice,
+.rejected-notice {
+  width: 100%;
+  max-width: 680px;
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.approved-notice {
+  background: color-mix(in srgb, var(--green) 14%, var(--surface));
+  color: var(--green);
+  border: 1px solid color-mix(in srgb, var(--green) 45%, var(--border));
+}
+
+.rejected-notice {
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 40%, var(--border));
+}
+
+.rejected-notice a { color: inherit; text-decoration: underline; }
+
 .chat-window {
   width: 100%;
   max-width: 680px;
@@ -1553,6 +1578,8 @@ tr:last-child td {
 
   .chat-window,
   .pending-notice,
+  .approved-notice,
+  .rejected-notice,
   .chat-disclaimer,
   .profile-panel {
     width: 100%;
