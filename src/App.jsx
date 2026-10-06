@@ -16,11 +16,10 @@ function applyTheme(theme) {
 
 // How long to wait before giving up on a request (12 seconds)
 const REQUEST_TIMEOUT = 12000
-// Production must use the same-origin Vercel gateway. A browser-exposed
-// VITE_API_BASE_URL can otherwise contain a stale or local-only address and
-// prevent the login request from reaching the deployed account service.
-const API_URL = import.meta.env.PROD
-  ? "/api"
+// Keep account records on the deployed FastAPI service. The chatbot remains on
+// /api/ask, where provider secrets stay server-side in Vercel.
+const ACCOUNT_API_URL = import.meta.env.PROD
+  ? "https://casemindai-production.up.railway.app"
   : (import.meta.env.VITE_API_BASE_URL?.trim() || "/api")
 const PROFILE_STORAGE_PREFIX = "casemind_profile:"
 const LANG_STORAGE_KEY = "casemind_language"
@@ -316,9 +315,7 @@ async function apiRequest(path, options = {}) {
   const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT)
 
   try {
-    // Account data uses Railway directly; chatbot requests use Vercel's
-    // provider fallback so OpenAI/Groq keys stay server-side.
-    const url = path === "/ask" ? "/api/ask" : `${API_URL}${path}`
+    const url = path === "/ask" ? "/api/ask" : `${ACCOUNT_API_URL}${path}`
     const res = await fetch(url, {
       ...options,
       signal: controller.signal,
@@ -1797,19 +1794,22 @@ function AdminDashboard({ t }) {
   const [summary, setSummary] = useState(null)
   const [lawyers, setLawyers] = useState([])
   const [users, setUsers] = useState([])
-  const [activeTab, setActiveTab] = useState("pending")
+  const [activeTab, setActiveTab] = useState("users")
   const [statusMessage, setStatusMessage] = useState("")
 
   async function loadData() {
     try {
-      const [summaryData, lawyersData, usersData] = await Promise.all([
+      const results = await Promise.allSettled([
         apiRequest("/admin/summary"),
         apiRequest("/admin/lawyers"),
         apiRequest("/admin/users"),
       ])
-      setSummary(summaryData)
-      setLawyers(lawyersData.lawyers || [])
-      setUsers(usersData.users || [])
+      const [summaryResult, lawyersResult, usersResult] = results
+      const failed = results.find((result) => result.status === "rejected" || result.value?.success === false)
+      if (summaryResult.status === "fulfilled") setSummary(summaryResult.value)
+      if (lawyersResult.status === "fulfilled") setLawyers(lawyersResult.value?.lawyers || [])
+      if (usersResult.status === "fulfilled") setUsers(usersResult.value?.users || [])
+      if (failed) setStatusMessage("Some dashboard data could not be refreshed. Please try again.")
     } catch (err) {
       setStatusMessage(err.message)
     }
@@ -1864,6 +1864,7 @@ function AdminDashboard({ t }) {
         <p className="eyebrow">{t.adminDashboard}</p>
         <h1>{t.adminDashboard}</h1>
         <p>{t.verifyLawyers}</p>
+        <button type="button" className="ghost-btn" onClick={loadData}>Refresh dashboard</button>
       </section>
 
       {statusMessage && <p className="alert info">{statusMessage}</p>}
